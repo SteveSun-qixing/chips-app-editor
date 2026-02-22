@@ -1,0 +1,57 @@
+schemaVersion: "1.0.0"
+id: "chips-official.editor"
+name: "Chips Editor"
+version: "1.0.0"
+type: "app"
+publisher: "chips-official"
+description: "Card editing engine for Chips ecosystem"
+icon: "assets/icon.png"
+
+entry:
+  main: "dist/index.html"
+
+permissions:
+  - file.read
+  - file.write
+  - file.delete
+  - dialog.open
+  - dialog.save
+  - dialog.message
+  - window.control
+  - plugin.read
+  - plugin.manage
+  - config.read
+  - config.write
+  - theme.read
+  - theme.write
+  - i18n.read
+  - i18n.write
+  - resource.read
+  - resource.write
+  - clipboard.read
+  - clipboard.write
+  - shell.open
+
+capabilities:
+  fileTypes:
+    - ".card"
+    - ".box"
+  defaultFileTypes:
+    - ".card"
+
+window:
+  width: 1400
+  height: 900
+  minWidth: 1024
+  minHeight: 768
+  resizable: true
+  frame: true
+
+locales:
+  default: "zh-CN"
+  supported:
+    - "zh-CN"
+    - "en-US"
+
+compatibility:
+  host: "^1.0.0"

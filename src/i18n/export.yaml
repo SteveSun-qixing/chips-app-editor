@@ -1,0 +1,103 @@
+# 导出相关多语言词汇表
+# 开发阶段使用可读的 key，打包时自动替换为系统词汇编码
+
+export:
+  # 标题和标签
+  title: "导出卡片"
+  subtitle: "将卡片转换为不同格式"
+  
+  # 导出格式名称
+  formats:
+    card:
+      name: "卡片文件"
+      desc: ".card 格式"
+      icon: "📦"
+    html:
+      name: "网页"
+      desc: "HTML 格式"
+      icon: "🌐"
+    pdf:
+      name: "文档"
+      desc: "PDF 格式"
+      icon: "📄"
+    image:
+      name: "图片"
+      desc: "PNG/JPG 格式"
+      icon: "🖼️"
+  
+  # 状态文本
+  status:
+    idle: "准备就绪"
+    exporting: "正在导出..."
+    success: "导出成功"
+    error: "导出失败"
+    cancelled: "已取消"
+  
+  # 步骤描述
+  steps:
+    preparing: "准备中..."
+    validating: "验证数据..."
+    saving: "保存卡片..."
+    reading: "读取数据..."
+    converting: "转换中..."
+    rendering: "渲染页面..."
+    generating: "生成文件..."
+    capturing: "截取图片..."
+    compressing: "压缩文件..."
+    writing: "写入文件..."
+    completed: "完成"
+  
+  # 成功/错误消息
+  messages:
+    success: "导出完成！保存至: {path}"
+    success_simple: "导出完成"
+    failed: "导出失败: {error}"
+    cancelled: "导出已取消"
+    server_unavailable: "服务不可用，请稍后重试"
+    invalid_path: "请指定有效的输出路径"
+    file_exists: "文件已存在，是否覆盖？"
+    disk_full: "磁盘空间不足"
+    permission_denied: "没有写入权限"
+  
+  # 选项标签
+  options:
+    output_path: "输出路径"
+    output_path_placeholder: "指定导出文件的路径"
+    include_assets: "包含资源文件"
+    include_resources: "包含资源"
+    compress: "压缩文件"
+    theme: "使用主题"
+    theme_default: "使用卡片默认主题"
+    
+    # 图片选项
+    image_format: "图片格式"
+    image_quality: "质量"
+    image_scale: "缩放比例"
+    image_width: "宽度"
+    image_height: "高度"
+    image_transparent: "透明背景"
+    
+    # PDF 选项
+    pdf_page_format: "页面格式"
+    pdf_orientation: "页面方向"
+    pdf_orientation_portrait: "纵向"
+    pdf_orientation_landscape: "横向"
+    pdf_margin: "页边距"
+    pdf_header_footer: "页眉页脚"
+  
+  # 按钮文本
+  buttons:
+    export: "导出"
+    cancel: "取消导出"
+    retry: "重试"
+    close: "关闭"
+  
+  # 提示信息
+  hints:
+    card_format: "导出为标准 .card 文件，可在任何薯片查看器中打开"
+    html_format: "导出为完整的 HTML 网页，可在浏览器中离线浏览"
+    pdf_format: "导出为 PDF 文档，适合打印和分享"
+    image_format: "导出为图片，适合社交媒体分享"
+    
+    large_file_warning: "卡片包含大量资源，导出可能需要较长时间"
+    missing_resources: "部分资源缺失，导出的文件可能不完整"

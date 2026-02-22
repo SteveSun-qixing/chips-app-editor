@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+*.md
+*.html
+.gitignore
+.eslintrc.cjs
+package-lock.json

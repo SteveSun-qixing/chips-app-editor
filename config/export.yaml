@@ -1,0 +1,172 @@
+# 导出配置文件
+# 定义卡片导出的默认行为和选项
+
+export:
+  # 默认导出目录
+  # 支持变量: ${workspace}, ${home}, ${documents}
+  default_output_dir: "${workspace}/exports"
+  
+  # 文件命名配置
+  naming:
+    # 命名模式
+    # 可用变量: {name}, {id}, {timestamp}, {format}
+    pattern: "{name}_{timestamp}"
+    
+    # 时间戳格式
+    timestamp_format: "YYYYMMDD_HHmmss"
+    
+    # 文件名冲突处理策略
+    # - auto_increment: 自动添加编号 (name_1, name_2...)
+    # - overwrite: 覆盖已存在的文件
+    # - prompt: 提示用户选择
+    conflict_strategy: "auto_increment"
+    
+    # 文件名清理规则
+    sanitize:
+      # 是否移除特殊字符
+      remove_special_chars: true
+      # 替换空格为下划线
+      replace_spaces: true
+      # 最大文件名长度
+      max_length: 100
+  
+  # 卡片文件(.card)默认选项
+  card:
+    # 是否压缩 (false = 存储模式，零压缩率)
+    compress: false
+    
+    # 是否包含资源文件
+    include_resources: true
+    
+    # 资源处理模式
+    # - full: 全填充（所有资源打包到 .card 中）
+    # - semi: 半空壳（部分资源打包）
+    # - shell: 空壳（不打包资源，只引用）
+    resource_mode: "full"
+    
+    # 是否生成校验值
+    generate_checksum: true
+    
+    # 是否验证结构
+    validate_structure: true
+    
+    # 单个资源文件大小限制（字节）
+    max_resource_size: 524288000  # 500MB
+    
+    # 卡片文件大小限制（字节）
+    max_card_size: 2147483648  # 2GB (ZIP 格式限制)
+  
+  # HTML 网页默认选项
+  html:
+    # 是否包含资源文件
+    include_assets: true
+    
+    # 资源处理策略
+    # - copy-all: 复制所有资源
+    # - copy-local: 只复制本地资源
+    # - embed: 嵌入为 Base64
+    # - reference-only: 只保留引用
+    asset_strategy: "copy-local"
+    
+    # 主题 ID（空表示使用卡片自己的主题）
+    theme_id: ""
+    
+    # 输出目录结构
+    structure:
+      # 是否创建子目录
+      create_subdirs: true
+      # 卡片 HTML 子目录名
+      cards_subdir: "cards"
+      # 资源子目录名
+      assets_subdir: "assets"
+    
+    # 并发处理数量
+    parallel_count: 4
+  
+  # PDF 文档默认选项
+  pdf:
+    # 页面格式
+    # 支持: a4, a5, a3, letter, legal, tabloid
+    page_format: "a4"
+    
+    # 页面方向
+    # 支持: portrait (纵向), landscape (横向)
+    orientation: "portrait"
+    
+    # 页边距
+    margin:
+      top: "15mm"
+      right: "15mm"
+      bottom: "15mm"
+      left: "15mm"
+    
+    # 是否打印背景图形
+    print_background: true
+    
+    # 是否显示页眉页脚
+    display_header_footer: false
+    
+    # 是否生成 PDF 书签
+    generate_outline: false
+    
+    # 主题 ID
+    theme_id: ""
+  
+  # 图片默认选项
+  image:
+    # 图片格式
+    # 支持: png, jpg, jpeg
+    format: "png"
+    
+    # JPG 质量 (1-100)
+    quality: 90
+    
+    # 缩放比例 (设备像素比)
+    scale: 1
+    
+    # 固定宽度（像素，0 表示自适应）
+    width: 0
+    
+    # 固定高度（像素，0 表示自适应）
+    height: 0
+    
+    # 背景颜色
+    background_color: "#ffffff"
+    
+    # 是否透明背景（仅 PNG）
+    transparent: false
+    
+    # 页面加载后等待时间（毫秒）
+    wait_time: 1000
+    
+    # 主题 ID
+    theme_id: ""
+  
+  # 性能配置
+  performance:
+    # 导出超时时间（毫秒）
+    timeout:
+      card: 60000    # 1 分钟
+      html: 120000   # 2 分钟
+      pdf: 180000    # 3 分钟
+      image: 180000  # 3 分钟
+    
+    # 最大并发导出任务数
+    max_concurrent_exports: 3
+    
+    # 是否启用进度缓存
+    cache_progress: true
+  
+  # UI 配置
+  ui:
+    # 是否在导出完成后自动打开文件位置
+    open_on_complete: false
+    
+    # 成功消息显示时长（毫秒）
+    success_message_duration: 5000
+    
+    # 是否在导出前显示确认对话框
+    confirm_before_export: false
+    
+    # 是否显示高级选项
+    show_advanced_options: false

@@ -18,9 +18,6 @@ import {
   shallowRef,
   nextTick,
   markRaw,
-  isRef,
-  isProxy,
-  toRaw,
   type Component,
 } from 'vue';
 import { Button } from '@chips/components';
@@ -34,11 +31,24 @@ import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
 import { resourceService } from '@/services/resource-service';
 import {
-  buildCardResourceFullPath,
-  releaseCardResourceUrl,
-  resolveCardResourceUrl,
-  type CardResolvedResource,
-} from '@/services/card-resource-resolver';
+  createRequestNonceTracker,
+  generateBridgeNonce,
+  getIframeTargetOrigin,
+  hasRoutePermission,
+  isTrustedBridgeEnvelope,
+  isTrustedIframeOrigin,
+  normalizePermissionToken,
+  resolveIframeOrigin,
+} from './plugin-host/bridge-security';
+import { createIframeMessageChannel } from './plugin-host/message-channel';
+import { createEditorResourceRegistry } from './plugin-host/resource-registry';
+import type {
+  IframeBridgeRequestMessage,
+  IframeConfigUpdateMessage,
+  IframeI18nEnvelope,
+  IframeResizeMessage,
+} from './plugin-host/types';
+import { createIframeVocabularyLoader } from './plugin-host/vocabulary-loader';
 
 // ==================== Props ====================
 interface Props {
@@ -103,12 +113,6 @@ const iframePermissions = ref<Set<string>>(new Set());
 /** 当前 iframe 权限是否已加载 */
 const iframePermissionsLoaded = ref(false);
 
-/** 已消费请求 nonce（防重放） */
-const consumedIframeRequestNonces = new Set<string>();
-
-/** 请求 nonce FIFO 队列（用于回收） */
-const consumedIframeRequestNonceQueue: string[] = [];
-
 /** 是否正在加载（内部状态） */
 const isLoadingInternal = ref(true);
 
@@ -156,12 +160,6 @@ let saveInFlight: Promise<void> | null = null;
 
 /** 是否请求了尾随落盘 */
 let trailingSaveRequested = false;
-
-/** 编辑器资源解析缓存（fullPath -> resolved resource） */
-const resolvedEditorResources = new Map<string, CardResolvedResource>();
-
-let vocabularyLoadSequence = 0;
-let vocabularyVersionSequence = 0;
 let iframePermissionLoadSequence = 0;
 
 /** 富文本编辑器状态 */
@@ -187,49 +185,8 @@ const editorState = ref<{
   isFocused: false,
 });
 
-interface IframeBridgeRequestMessage {
-  type: 'bridge-request';
-  pluginId: string;
-  sessionNonce: string;
-  requestNonce: string;
-  requestId: string;
-  namespace: string;
-  action: string;
-  params?: unknown;
-}
-
-interface IframeConfigUpdateMessage {
-  type: 'config-update';
-  pluginId: string;
-  sessionNonce: string;
-  config: Record<string, unknown>;
-  persist?: boolean;
-}
-
-interface IframeEditorCancelMessage {
-  type: 'editor-cancel';
-  pluginId: string;
-  sessionNonce: string;
-}
-
-interface IframeResizeMessage {
-  type: 'resize';
-  pluginId: string;
-  sessionNonce: string;
-  width?: number;
-  height?: number;
-}
-
-interface IframeVocabularyPayload {
-  mode: 'full';
-  vocabulary: Record<string, string>;
-}
-
-interface IframeI18nEnvelope {
-  locale: string;
-  version: string;
-  payload: IframeVocabularyPayload;
-}
+const resourceRegistry = createEditorResourceRegistry();
+const requestNonceTracker = createRequestNonceTracker(MAX_TRACKED_IFRAME_REQUEST_NONCES);
 
 function getTargetCard(): CardInfo | null {
   if (props.cardId) {
@@ -243,109 +200,74 @@ function resolveTargetCardPath(card: CardInfo | null): string {
   return resolveCardPath(card?.id, card?.filePath, resourceService.workspaceRoot);
 }
 
-async function resolveEditorResource(fullPath: string): Promise<string> {
-  const cached = resolvedEditorResources.get(fullPath);
-  if (cached) {
-    return cached.url;
+function toStringRecord(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
   }
 
-  const resolved = await resolveCardResourceUrl(fullPath);
-  resolvedEditorResources.set(fullPath, resolved);
-  return resolved.url;
-}
-
-async function releaseEditorResource(fullPath: string): Promise<void> {
-  const resolved = resolvedEditorResources.get(fullPath);
-  if (!resolved) return;
-
-  await releaseCardResourceUrl(resolved);
-  resolvedEditorResources.delete(fullPath);
-}
-
-async function releaseEditorResourceByRelativePath(cardPath: string, resourcePath: string): Promise<void> {
-  const fullPath = buildCardResourceFullPath(cardPath, resourcePath);
-  if (resolvedEditorResources.has(fullPath)) {
-    await releaseEditorResource(fullPath);
-    return;
-  }
-
-  const normalizedSuffix = `/${resourcePath.replace(/^\/+/, '')}`;
-  for (const path of resolvedEditorResources.keys()) {
-    if (path.endsWith(normalizedSuffix)) {
-      await releaseEditorResource(path);
-      return;
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item !== 'string') {
+      return null;
     }
+    result[key] = item;
   }
+
+  return result;
 }
 
-async function releaseAllEditorResources(): Promise<void> {
-  const resources = Array.from(resolvedEditorResources.values());
-  resolvedEditorResources.clear();
-  await Promise.all(resources.map((resource) => releaseCardResourceUrl(resource)));
-}
-
-function generateBridgeNonce(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `nonce-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function resolveIframeOrigin(url: string): string | null {
-  if (!url) {
+async function fetchHostPluginVocabulary(
+  pluginId: string,
+  locale: string
+): Promise<Record<string, string> | null> {
+  if (typeof window === 'undefined' || !window.chips) {
     return null;
   }
 
   try {
-    return new URL(url, window.location.href).origin;
+    const response = await window.chips.invoke('i18n', 'getPluginVocabulary', {
+      pluginId,
+      locale,
+    });
+
+    const directVocabulary = toStringRecord(response);
+    if (directVocabulary) {
+      return directVocabulary;
+    }
+
+    if (response && typeof response === 'object' && !Array.isArray(response)) {
+      const nestedVocabulary = toStringRecord((response as { vocabulary?: unknown }).vocabulary);
+      if (nestedVocabulary) {
+        return nestedVocabulary;
+      }
+    }
   } catch {
     return null;
   }
+
+  return null;
 }
 
-function normalizePermissionToken(value: string): string {
-  return value.trim().toLowerCase();
-}
+const vocabularyLoader = createIframeVocabularyLoader({
+  getPluginId: () => iframePluginId.value,
+  isEnabled: () => runtimeMode.value === 'iframe' && iframeEditorUrl.value.length > 0,
+  getLocalVocabulary: async (pluginId, locale) => getLocalPluginVocabulary(pluginId, locale),
+  getHostVocabulary: fetchHostPluginVocabulary,
+});
 
-function hasRoutePermission(permissions: ReadonlySet<string>, namespace: string, action: string): boolean {
-  const normalizedNamespace = namespace.trim().toLowerCase();
-  const normalizedAction = action.trim().toLowerCase();
-  const exact = `${normalizedNamespace}.${normalizedAction}`;
-  const wildcard = `${normalizedNamespace}.*`;
-  return (
-    permissions.has(exact)
-    || permissions.has(wildcard)
-    || permissions.has('*')
-  );
-}
-
-function trackConsumedRequestNonce(nonce: string): boolean {
-  if (consumedIframeRequestNonces.has(nonce)) {
-    return false;
-  }
-
-  consumedIframeRequestNonces.add(nonce);
-  consumedIframeRequestNonceQueue.push(nonce);
-
-  if (consumedIframeRequestNonceQueue.length > MAX_TRACKED_IFRAME_REQUEST_NONCES) {
-    const stale = consumedIframeRequestNonceQueue.shift();
-    if (stale) {
-      consumedIframeRequestNonces.delete(stale);
-    }
-  }
-
-  return true;
-}
+const messageChannel = createIframeMessageChannel({
+  getIframeWindow: () => pluginIframeRef.value?.contentWindow ?? null,
+  getTargetOrigin: () => getIframeTargetOrigin(iframeTrustedOrigin.value),
+});
 
 function resetIframeSecurityContext(url: string, pluginId: string): void {
   iframeSessionNonce.value = generateBridgeNonce();
   iframeTrustedOrigin.value = resolveIframeOrigin(url);
   iframePermissions.value = new Set();
   iframePermissionsLoaded.value = false;
-  iframeVocabularyVersion.value = 'init';
-  vocabularyVersionSequence = 0;
-  consumedIframeRequestNonces.clear();
-  consumedIframeRequestNonceQueue.length = 0;
+  vocabularyLoader.reset();
+  iframeVocabularyVersion.value = vocabularyLoader.getCurrentVersion();
+  requestNonceTracker.reset();
 
   if (!pluginId) {
     return;
@@ -357,71 +279,9 @@ function clearIframeSecurityContext(): void {
   iframeTrustedOrigin.value = null;
   iframePermissions.value = new Set();
   iframePermissionsLoaded.value = false;
-  iframeVocabularyVersion.value = 'init';
-  vocabularyVersionSequence = 0;
-  consumedIframeRequestNonces.clear();
-  consumedIframeRequestNonceQueue.length = 0;
-}
-
-function getIframeTargetOrigin(): string {
-  const trustedOrigin = iframeTrustedOrigin.value;
-  if (trustedOrigin && trustedOrigin !== 'null') {
-    return trustedOrigin;
-  }
-  return '*';
-}
-
-function isTrustedIframeOrigin(origin: string): boolean {
-  const expectedOrigin = iframeTrustedOrigin.value;
-  if (!expectedOrigin) {
-    return false;
-  }
-
-  if (expectedOrigin === 'null') {
-    return origin === 'null' || origin.startsWith('chips://') || origin === 'file://';
-  }
-
-  if (expectedOrigin.startsWith('chips://') && origin === 'null') {
-    return true;
-  }
-
-  if (expectedOrigin.startsWith('file://') && origin === 'null') {
-    return true;
-  }
-
-  return origin === expectedOrigin;
-}
-
-function isIframeBridgeEnvelope(message: Record<string, unknown>): message is {
-  pluginId: string;
-  sessionNonce: string;
-} {
-  return typeof message.pluginId === 'string' && typeof message.sessionNonce === 'string';
-}
-
-function isTrustedIframeBridgeEnvelope(message: Record<string, unknown>): boolean {
-  if (!isIframeBridgeEnvelope(message)) {
-    return false;
-  }
-
-  return (
-    message.pluginId === iframePluginId.value
-    && message.sessionNonce === iframeSessionNonce.value
-  );
-}
-
-function buildI18nEnvelope(locale: string, vocabulary: Record<string, string>): IframeI18nEnvelope {
-  const pluginId = iframePluginId.value || 'unknown-plugin';
-  const version = `${pluginId}:${locale}:v${++vocabularyVersionSequence}`;
-  iframeVocabularyVersion.value = version;
-  return {
-    locale,
-    version,
-    payload: {
-      mode: 'full',
-      vocabulary,
-    },
-  };
+  vocabularyLoader.reset();
+  iframeVocabularyVersion.value = vocabularyLoader.getCurrentVersion();
+  requestNonceTracker.reset();
 }
 
 async function ensureIframePermissionsLoaded(pluginId: string): Promise<void> {
@@ -473,9 +333,8 @@ const editorOptions = computed(() => {
      * @returns 浏览器可访问的 blob URL
      */
     onResolveResource: async (resourcePath: string): Promise<string> => {
-      const fullPath = buildCardResourceFullPath(cardPath, resourcePath);
       try {
-        return await resolveEditorResource(fullPath);
+        return await resourceRegistry.resolveByRelativePath(cardPath, resourcePath);
       } catch {
         return '';
       }
@@ -486,7 +345,7 @@ const editorOptions = computed(() => {
      * @param resourcePath - 资源在卡片根目录内的相对路径
      */
     onReleaseResolvedResource: async (resourcePath: string): Promise<void> => {
-      await releaseEditorResourceByRelativePath(cardPath, resourcePath);
+      await resourceRegistry.releaseByRelativePath(cardPath, resourcePath);
     },
   };
 });
@@ -555,7 +414,6 @@ async function loadPlugin(): Promise<void> {
       iframePluginId.value = '';
       iframeVocabulary.value = {};
       clearIframeSecurityContext();
-      vocabularyLoadSequence += 1;
       emit('plugin-loaded', null);
       loadedTypes.add(props.cardType);
       console.warn('[PluginHost] 加载组件模式编辑器:', props.cardType);
@@ -567,7 +425,6 @@ async function loadPlugin(): Promise<void> {
       iframePluginId.value = runtime.pluginId;
       iframeVocabulary.value = {};
       resetIframeSecurityContext(runtime.iframeUrl, runtime.pluginId);
-      vocabularyLoadSequence += 1;
       void ensureIframePermissionsLoaded(runtime.pluginId);
       emit('plugin-loaded', null);
       loadedTypes.add(props.cardType);
@@ -581,7 +438,6 @@ async function loadPlugin(): Promise<void> {
       iframePluginId.value = '';
       iframeVocabulary.value = {};
       clearIframeSecurityContext();
-      vocabularyLoadSequence += 1;
       emit('plugin-loaded', null);
     }
     
@@ -614,7 +470,7 @@ async function unloadPlugin(): Promise<void> {
     currentPlugin.value = null;
   }
 
-  await releaseAllEditorResources();
+  await resourceRegistry.releaseAll();
   
   // 清空容器
   if (pluginContainerRef.value) {
@@ -629,7 +485,6 @@ async function unloadPlugin(): Promise<void> {
   iframePluginId.value = '';
   iframeVocabulary.value = {};
   clearIframeSecurityContext();
-  vocabularyLoadSequence += 1;
   runtimeMode.value = 'none';
 }
 
@@ -758,216 +613,26 @@ function buildThemeCss(): string {
   return cssText ? `:root { ${cssText} }` : '';
 }
 
-function normalizePostMessageValue(
-  value: unknown,
-  seen: WeakMap<object, unknown> = new WeakMap()
-): unknown {
-  if (isRef(value)) {
-    return normalizePostMessageValue(value.value, seen);
-  }
-
-  if (
-    value === null
-    || value === undefined
-    || typeof value === 'string'
-    || typeof value === 'number'
-    || typeof value === 'boolean'
-    || typeof value === 'bigint'
-  ) {
-    return value;
-  }
-
-  if (typeof value === 'symbol' || typeof value === 'function') {
-    return undefined;
-  }
-
-  const rawValue = isProxy(value) ? toRaw(value as object) : value;
-  if (typeof rawValue !== 'object' || rawValue === null) {
-    return rawValue;
-  }
-
-  if (
-    rawValue instanceof Date
-    || rawValue instanceof RegExp
-    || rawValue instanceof Blob
-    || (typeof File !== 'undefined' && rawValue instanceof File)
-    || rawValue instanceof ArrayBuffer
-    || ArrayBuffer.isView(rawValue)
-  ) {
-    return rawValue;
-  }
-
-  if (seen.has(rawValue)) {
-    return seen.get(rawValue);
-  }
-
-  if (Array.isArray(rawValue)) {
-    const normalizedArray: unknown[] = [];
-    seen.set(rawValue, normalizedArray);
-    for (const item of rawValue) {
-      normalizedArray.push(normalizePostMessageValue(item, seen));
-    }
-    return normalizedArray;
-  }
-
-  if (rawValue instanceof Map) {
-    const normalizedMap = new Map<unknown, unknown>();
-    seen.set(rawValue, normalizedMap);
-    for (const [key, item] of rawValue.entries()) {
-      const normalizedItem = normalizePostMessageValue(item, seen);
-      if (normalizedItem !== undefined) {
-        normalizedMap.set(key, normalizedItem);
-      }
-    }
-    return normalizedMap;
-  }
-
-  if (rawValue instanceof Set) {
-    const normalizedSet = new Set<unknown>();
-    seen.set(rawValue, normalizedSet);
-    for (const item of rawValue.values()) {
-      const normalizedItem = normalizePostMessageValue(item, seen);
-      if (normalizedItem !== undefined) {
-        normalizedSet.add(normalizedItem);
-      }
-    }
-    return normalizedSet;
-  }
-
-  const normalizedObject: Record<string, unknown> = {};
-  seen.set(rawValue, normalizedObject);
-  for (const [key, item] of Object.entries(rawValue as Record<string, unknown>)) {
-    const normalizedItem = normalizePostMessageValue(item, seen);
-    if (normalizedItem !== undefined) {
-      normalizedObject[key] = normalizedItem;
-    }
-  }
-  return normalizedObject;
-}
-
-function createCloneableMessagePayload<T>(message: T): T {
-  const normalized = normalizePostMessageValue(message);
-  if (typeof structuredClone === 'function') {
-    return structuredClone(normalized) as T;
-  }
-  return JSON.parse(JSON.stringify(normalized)) as T;
-}
-
 function postMessageToIframe(message: Record<string, unknown>): boolean {
-  const iframeWindow = pluginIframeRef.value?.contentWindow;
-  if (!iframeWindow) {
-    return false;
-  }
-
-  try {
-    const cloneablePayload = createCloneableMessagePayload(message);
-    iframeWindow.postMessage(cloneablePayload, getIframeTargetOrigin());
-    return true;
-  } catch (error) {
+  const posted = messageChannel.post(message);
+  if (!posted) {
     console.error('[PluginHost] Failed to postMessage to iframe', {
       type: message.type,
-      error,
     });
-    return false;
   }
-}
-
-function toStringRecord(value: unknown): Record<string, string> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof item !== 'string') {
-      return null;
-    }
-    result[key] = item;
-  }
-  return result;
-}
-
-async function fetchHostPluginVocabulary(
-  pluginId: string,
-  locale: string
-): Promise<Record<string, string> | null> {
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
-  }
-
-  try {
-    const response = await window.chips.invoke('i18n', 'getPluginVocabulary', {
-      pluginId,
-      locale,
-    });
-
-    const directVocabulary = toStringRecord(response);
-    if (directVocabulary) {
-      return directVocabulary;
-    }
-
-    if (response && typeof response === 'object' && !Array.isArray(response)) {
-      const nestedVocabulary = toStringRecord((response as { vocabulary?: unknown }).vocabulary);
-      if (nestedVocabulary) {
-        return nestedVocabulary;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
+  return posted;
 }
 
 async function loadIframeVocabulary(locale: string): Promise<Record<string, string>> {
-  if (!useIframeEditor.value || !iframePluginId.value) {
-    iframeVocabulary.value = {};
-    iframeVocabularyVersion.value = 'init';
-    return {};
-  }
-
-  const currentSequence = ++vocabularyLoadSequence;
-  const pluginId = iframePluginId.value;
-  const localVocabulary = await getLocalPluginVocabulary(pluginId, locale);
-  const hostVocabulary = await fetchHostPluginVocabulary(pluginId, locale);
-  const resolvedVocabulary: Record<string, string> = {};
-  const vocabularyKeys = new Set<string>([
-    ...Object.keys(localVocabulary ?? {}),
-    ...Object.keys(hostVocabulary ?? {}),
-  ]);
-
-  for (const key of vocabularyKeys) {
-    const hostValue = hostVocabulary?.[key];
-    const localValue = localVocabulary?.[key];
-
-    if (typeof hostValue === 'string' && hostValue.trim().length > 0) {
-      if (hostValue === key) {
-        if (
-          typeof localValue === 'string'
-          && localValue.trim().length > 0
-          && localValue !== key
-        ) {
-          resolvedVocabulary[key] = localValue;
-        }
-        continue;
-      }
-
-      resolvedVocabulary[key] = hostValue;
-      continue;
-    }
-
-    if (typeof localValue === 'string' && localValue.trim().length > 0) {
-      resolvedVocabulary[key] = localValue;
-    }
-  }
-
-  if (currentSequence !== vocabularyLoadSequence) {
-    return iframeVocabulary.value;
-  }
-
+  const resolvedVocabulary = await vocabularyLoader.load(locale);
   iframeVocabulary.value = resolvedVocabulary;
-  buildI18nEnvelope(locale, resolvedVocabulary);
   return resolvedVocabulary;
+}
+
+function buildI18nEnvelope(locale: string, vocabulary: Record<string, string>): IframeI18nEnvelope {
+  const envelope = vocabularyLoader.buildEnvelope(locale, vocabulary);
+  iframeVocabularyVersion.value = envelope.version;
+  return envelope;
 }
 
 function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): boolean {
@@ -1127,7 +792,7 @@ async function handleIframeBridgeRequest(message: IframeBridgeRequestMessage): P
     return;
   }
 
-  if (!trackConsumedRequestNonce(message.requestNonce)) {
+  if (!requestNonceTracker.track(message.requestNonce)) {
     postIframeBridgeResponse(message.requestId, {
       requestNonce: message.requestNonce,
       error: {
@@ -1250,7 +915,7 @@ function handleIframeMessage(event: MessageEvent): void {
     return;
   }
 
-  if (!isTrustedIframeOrigin(event.origin)) {
+  if (!isTrustedIframeOrigin(event.origin, iframeTrustedOrigin.value)) {
     return;
   }
 
@@ -1263,7 +928,7 @@ function handleIframeMessage(event: MessageEvent): void {
     return;
   }
 
-  if (!isTrustedIframeBridgeEnvelope(record)) {
+  if (!isTrustedBridgeEnvelope(record, iframePluginId.value, iframeSessionNonce.value)) {
     return;
   }
 

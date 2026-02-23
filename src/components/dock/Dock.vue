@@ -105,9 +105,12 @@ function handleOpenSettings(): void {
   display: flex;
   gap: 10px;
   padding: 10px 14px;
-  background: var(--chips-color-surface, #ffffff);
+  background: var(--chips-color-surface, rgba(255, 255, 255, 0.85));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--chips-color-border-light, rgba(255, 255, 255, 0.6));
   border-radius: var(--chips-radius-lg, 12px);
-  box-shadow: var(--chips-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.12));
+  box-shadow: var(--chips-shadow-float, 0 6px 16px -2px rgba(0, 0, 0, 0.14));
   pointer-events: auto;
   z-index: 1000;
   transition: opacity 0.3s, transform 0.3s;
@@ -141,7 +144,7 @@ function handleOpenSettings(): void {
 .dock__divider {
   width: 1px;
   height: 32px;
-  background: var(--chips-color-border, #e0e0e0);
+  background: var(--chips-color-border, #d1d5db);
   align-self: center;
   flex-shrink: 0;
 }

@@ -474,13 +474,13 @@ function clearDragVisualState(): void {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--chips-color-background, #fafafa);
+  background: var(--chips-color-background, #f0f2f5);
   user-select: none;
   transition: background-color 0.2s ease;
 }
 
 .infinite-canvas--drag-over {
-  background-color: var(--chips-color-primary-light, rgba(24, 144, 255, 0.05));
+  background-color: var(--chips-color-primary-subtle, rgba(37, 99, 235, 0.06));
 }
 
 .infinite-canvas__grid {
@@ -491,8 +491,9 @@ function clearDragVisualState(): void {
   height: 100%;
   pointer-events: none;
   background-image:
-    linear-gradient(to right, var(--chips-color-border, #e0e0e0) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--chips-color-border, #e0e0e0) 1px, transparent 1px);
+    linear-gradient(to right, var(--chips-color-border, #d1d5db) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--chips-color-border, #d1d5db) 1px, transparent 1px);
+  opacity: 0.4;
 }
 
 .infinite-canvas__insert-indicator {

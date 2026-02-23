@@ -5,26 +5,31 @@
 
 :root {
   /* 颜色 - 主色调 */
-  --chips-color-primary: #3b82f6;
-  --chips-color-primary-light: #60a5fa;
+  --chips-color-primary: #2563eb;
+  --chips-color-primary-light: #3b82f6;
   --chips-color-primary-dark: #1d4ed8;
-  --chips-color-info: #3b82f6;
-  --chips-color-success: #10b981;
-  --chips-color-warning: #f59e0b;
-  --chips-color-error: #ef4444;
+  --chips-color-primary-subtle: rgba(37, 99, 235, 0.08);
+  --chips-color-info: #2563eb;
+  --chips-color-success: #059669;
+  --chips-color-warning: #d97706;
+  --chips-color-error: #dc2626;
 
   /* 颜色 - 背景 */
-  --chips-color-background: #ffffff;
+  --chips-color-background: #f0f2f5;
   --chips-color-surface: #ffffff;
+  --chips-color-surface-variant: #f7f8fa;
+  --chips-color-surface-hover: rgba(0, 0, 0, 0.06);
+  --chips-color-surface-elevated: #ffffff;
 
   /* 颜色 - 文字 */
-  --chips-color-text: #111827;
-  --chips-color-text-secondary: #6b7280;
-  --chips-color-text-disabled: #9ca3af;
+  --chips-color-text: #0f172a;
+  --chips-color-text-secondary: #475569;
+  --chips-color-text-disabled: #94a3b8;
 
   /* 颜色 - 边框 */
-  --chips-color-border: #e5e7eb;
-  --chips-color-divider: #e5e7eb;
+  --chips-color-border: #d1d5db;
+  --chips-color-border-light: #e5e7eb;
+  --chips-color-divider: #d1d5db;
 
   /* 字体 */
   --chips-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
@@ -55,10 +60,13 @@
   --chips-radius-lg: 12px;
 
   /* 阴影 */
-  --chips-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --chips-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --chips-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --chips-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --chips-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.08);
+  --chips-shadow-md: 0 4px 8px -1px rgb(0 0 0 / 0.12), 0 2px 4px -2px rgb(0 0 0 / 0.08);
+  --chips-shadow-lg: 0 10px 20px -3px rgb(0 0 0 / 0.16), 0 4px 8px -4px rgb(0 0 0 / 0.1);
+  --chips-shadow-xl: 0 20px 30px -5px rgb(0 0 0 / 0.18), 0 8px 12px -6px rgb(0 0 0 / 0.12);
+  --chips-shadow-window: 0 8px 24px -4px rgb(0 0 0 / 0.14), 0 2px 8px -2px rgb(0 0 0 / 0.08);
+  --chips-shadow-window-focused: 0 12px 32px -4px rgb(0 0 0 / 0.18), 0 4px 12px -2px rgb(0 0 0 / 0.1);
+  --chips-shadow-float: 0 6px 16px -2px rgb(0 0 0 / 0.14), 0 2px 6px -1px rgb(0 0 0 / 0.08);
 
   /* 过渡 */
   --chips-transition-fast: 150ms ease;
@@ -75,9 +83,9 @@
   --color-secondary: var(--chips-color-text-secondary);
   --color-secondary-hover: var(--chips-color-text);
   --color-background: var(--chips-color-background);
-  --color-background-secondary: var(--chips-color-surface);
+  --color-background-secondary: var(--chips-color-surface-variant);
   --color-surface: var(--chips-color-surface);
-  --color-surface-elevated: var(--chips-color-surface);
+  --color-surface-elevated: var(--chips-color-surface-elevated);
   --color-text-primary: var(--chips-color-text);
   --color-text-secondary: var(--chips-color-text-secondary);
   --color-text-tertiary: var(--chips-color-text-disabled);
@@ -86,9 +94,9 @@
   --color-border: var(--chips-color-border);
   --color-border-hover: var(--chips-color-primary-light);
   --color-bg-primary: var(--chips-color-surface);
-  --color-bg-secondary: var(--chips-color-background);
+  --color-bg-secondary: var(--chips-color-surface-variant);
   --color-bg-tertiary: var(--chips-color-background);
-  --color-bg-hover: rgba(0, 0, 0, 0.04);
+  --color-bg-hover: var(--chips-color-surface-hover);
   --color-bg-disabled: rgba(0, 0, 0, 0.06);
   --color-primary-light: var(--chips-color-primary-light);
   --color-danger: var(--chips-color-error);
@@ -130,21 +138,30 @@
 
 /* 深色主题 */
 [data-theme='dark'] {
-  --chips-color-primary: #60a5fa;
-  --chips-color-primary-light: #93c5fd;
+  --chips-color-primary: #3b82f6;
+  --chips-color-primary-light: #60a5fa;
   --chips-color-primary-dark: #2563eb;
-  --chips-color-info: #60a5fa;
-  --chips-color-success: #34d399;
-  --chips-color-warning: #fbbf24;
-  --chips-color-error: #f87171;
+  --chips-color-primary-subtle: rgba(59, 130, 246, 0.12);
+  --chips-color-info: #3b82f6;
+  --chips-color-success: #10b981;
+  --chips-color-warning: #f59e0b;
+  --chips-color-error: #ef4444;
 
-  --chips-color-background: #111827;
-  --chips-color-surface: #1f2937;
+  --chips-color-background: #0f1117;
+  --chips-color-surface: #1a1d27;
+  --chips-color-surface-variant: #232733;
+  --chips-color-surface-hover: rgba(255, 255, 255, 0.08);
+  --chips-color-surface-elevated: #1e2230;
 
-  --chips-color-text: #f9fafb;
-  --chips-color-text-secondary: #9ca3af;
-  --chips-color-text-disabled: #6b7280;
+  --chips-color-text: #f1f5f9;
+  --chips-color-text-secondary: #94a3b8;
+  --chips-color-text-disabled: #64748b;
 
-  --chips-color-border: #374151;
-  --chips-color-divider: #374151;
+  --chips-color-border: #334155;
+  --chips-color-border-light: #2a3040;
+  --chips-color-divider: #334155;
+
+  --chips-shadow-window: 0 8px 24px -4px rgb(0 0 0 / 0.4), 0 2px 8px -2px rgb(0 0 0 / 0.3);
+  --chips-shadow-window-focused: 0 12px 32px -4px rgb(0 0 0 / 0.5), 0 4px 12px -2px rgb(0 0 0 / 0.35);
+  --chips-shadow-float: 0 6px 16px -2px rgb(0 0 0 / 0.4), 0 2px 6px -1px rgb(0 0 0 / 0.3);
 }

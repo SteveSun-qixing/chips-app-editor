@@ -58,10 +58,11 @@ function handleClick(): void {
   align-items: center;
   justify-content: center;
   border-radius: var(--chips-radius-md, 8px);
-  background: var(--chips-color-surface-variant, #f5f5f5);
+  background: var(--chips-color-surface-variant, #f0f2f5);
+  border: 1px solid transparent;
   cursor: pointer;
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-    background-color 0.2s, opacity 0.2s;
+    background-color 0.2s, border-color 0.2s, opacity 0.2s;
   user-select: none;
 }
 
@@ -76,7 +77,8 @@ function handleClick(): void {
 
 .dock-item:hover {
   transform: scale(1.12) translateY(-4px);
-  background: var(--chips-color-primary-light, rgba(59, 130, 246, 0.1));
+  background: var(--chips-color-primary-subtle, rgba(37, 99, 235, 0.08));
+  border-color: var(--chips-color-primary-light, rgba(59, 130, 246, 0.3));
 }
 
 .dock-item:active {

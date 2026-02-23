@@ -695,7 +695,7 @@ provide('editorContext', {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: var(--chips-color-background, #fafafa);
+  background-color: var(--chips-color-background, #f0f2f5);
 }
 
 /* 加载状态样式 */

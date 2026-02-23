@@ -201,9 +201,12 @@ function handleMouseLeave(): void {
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: var(--chips-color-surface, #ffffff);
+  background: var(--chips-color-surface, rgba(255, 255, 255, 0.9));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--chips-color-border-light, rgba(255, 255, 255, 0.6));
   border-radius: var(--chips-radius-lg, 8px);
-  box-shadow: var(--chips-shadow-md, 0 4px 12px rgba(0, 0, 0, 0.1));
+  box-shadow: var(--chips-shadow-float, 0 6px 16px -2px rgba(0, 0, 0, 0.14));
   z-index: 1000;
 }
 
@@ -212,21 +215,21 @@ function handleMouseLeave(): void {
   height: 26px;
   border: none;
   border-radius: var(--chips-radius-sm, 4px);
-  background: var(--chips-color-surface-variant, #f5f5f5);
+  background: var(--chips-color-surface-variant, #f0f2f5);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
   font-weight: 600;
-  color: var(--chips-color-text-primary, #1a1a1a);
+  color: var(--chips-color-text, #0f172a);
   transition: background-color 0.2s;
   flex-shrink: 0;
 }
 
 .zoom-control__button:hover:not(:disabled) {
-  background: var(--chips-color-primary-light, rgba(59, 130, 246, 0.1));
-  color: var(--chips-color-primary, #3b82f6);
+  background: var(--chips-color-primary-subtle, rgba(37, 99, 235, 0.1));
+  color: var(--chips-color-primary, #2563eb);
 }
 
 .zoom-control__button:disabled {
@@ -248,8 +251,8 @@ function handleMouseLeave(): void {
 }
 
 .zoom-control__more--active {
-  background: var(--chips-color-primary-light, rgba(59, 130, 246, 0.1));
-  color: var(--chips-color-primary, #3b82f6);
+  background: var(--chips-color-primary-subtle, rgba(37, 99, 235, 0.1));
+  color: var(--chips-color-primary, #2563eb);
 }
 
 .zoom-control__slider-container {

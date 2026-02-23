@@ -14,7 +14,7 @@ import { useCardStore, useEditorStore } from '@/core/state';
 vi.mock('@/components/edit-panel/PluginHost.vue', () => ({
   default: {
     name: 'PluginHost',
-    props: ['cardType', 'baseCardId', 'config'],
+    props: ['cardId', 'cardType', 'baseCardId', 'config'],
     emits: ['config-change'],
     template: '<div class="mock-plugin-host" data-testid="plugin-host"><slot /></div>',
   },
@@ -122,6 +122,17 @@ describe('EditPanel', () => {
       await nextTick();
 
       expect(wrapper.find('.edit-panel__editor').exists()).toBe(true);
+    });
+
+    it('应向 PluginHost 传递当前 cardId', async () => {
+      setupStoreWithCard();
+      cardStore.setSelectedBaseCard('base-001');
+
+      wrapper = mountComponent();
+      await nextTick();
+
+      const pluginHost = wrapper.findComponent({ name: 'PluginHost' });
+      expect(pluginHost.props('cardId')).toBe('card-001');
     });
 
     it('应该正确应用位置类名', () => {

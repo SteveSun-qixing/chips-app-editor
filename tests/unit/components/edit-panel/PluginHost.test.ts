@@ -17,6 +17,12 @@ const { getEditorRuntimeMock, getLocalPluginVocabularyMock, getCardPluginPermiss
   getCardPluginPermissionsMock: vi.fn(),
 }));
 
+const { resourceServiceMock } = vi.hoisted(() => ({
+  resourceServiceMock: {
+    workspaceRoot: '/ProductFinishedProductTestingSpace/TestWorkspace',
+  },
+}));
+
 vi.mock('@/services/plugin-service', () => ({
   getEditorRuntime: getEditorRuntimeMock,
   getLocalPluginVocabulary: getLocalPluginVocabularyMock,
@@ -35,6 +41,10 @@ vi.mock('@/components/edit-panel/DefaultEditor.vue', () => ({
 
 vi.mock('@/services/card-persistence-service', () => ({
   saveCardToWorkspace: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/services/resource-service', () => ({
+  resourceService: resourceServiceMock,
 }));
 
 describe('PluginHost', () => {
@@ -107,6 +117,35 @@ describe('PluginHost', () => {
     cardStore.addCard(mockCard);
     cardStore.setActiveCard('card-001');
     cardStore.setSelectedBaseCard('base-001');
+  }
+
+  function setupStoreWithSecondaryCard(): void {
+    const secondaryCard = {
+      id: 'card-002',
+      metadata: {
+        chip_standards_version: '1.0.0',
+        card_id: 'card-002',
+        name: 'Second Card',
+        created_at: '2026-01-01T00:00:00Z',
+        modified_at: '2026-01-01T00:00:00Z',
+      },
+      structure: {
+        structure: [
+          {
+            id: 'base-201',
+            type: 'TextCard',
+            config: { text: 'Second card content' },
+          },
+        ],
+        manifest: {
+          card_count: 1,
+          resource_count: 0,
+          resources: [],
+        },
+      },
+    };
+
+    cardStore.addCard(secondaryCard, 'TestWorkspace/card-002');
   }
 
   /**
@@ -347,6 +386,29 @@ describe('PluginHost', () => {
       await Promise.all([first, second]);
 
       expect(saveCardToWorkspace).toHaveBeenCalledTimes(2);
+    });
+
+    it('传入 cardId 时应保存对应卡片而非当前 activeCard', async () => {
+      setupStoreWithSecondaryCard();
+
+      wrapper = mountComponent({
+        cardId: 'card-002',
+        baseCardId: 'base-201',
+        config: { text: 'Second card content' },
+      });
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.isLoading = false;
+      vm.hasUnsavedChanges = true;
+
+      await vm.saveConfig();
+
+      expect(saveCardToWorkspace).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(saveCardToWorkspace).mock.calls[0]?.[0]?.id).toBe('card-002');
+      expect(vi.mocked(saveCardToWorkspace).mock.calls[0]?.[1]).toBe(
+        '/ProductFinishedProductTestingSpace/TestWorkspace/card-002',
+      );
     });
   });
 

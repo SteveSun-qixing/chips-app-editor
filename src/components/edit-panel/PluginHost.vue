@@ -25,12 +25,14 @@ import {
 } from 'vue';
 import { Button } from '@chips/components';
 import { useCardStore, useEditorStore, useUIStore } from '@/core/state';
+import type { CardInfo } from '@/core/state/stores/card';
 import DefaultEditor from './DefaultEditor.vue';
 import type { EditorPlugin } from './types';
 import { getEditorRuntime, getLocalPluginVocabulary, getCardPluginPermissions } from '@/services/plugin-service';
 import { t } from '@/services/i18n-service';
-import { resolveCardPath } from '@/services/card-path-service';
+import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
+import { resourceService } from '@/services/resource-service';
 import {
   buildCardResourceFullPath,
   releaseCardResourceUrl,
@@ -40,6 +42,8 @@ import {
 
 // ==================== Props ====================
 interface Props {
+  /** 复合卡片 ID（用于定位非活动窗口的卡片） */
+  cardId?: string;
   /** 基础卡片类型 */
   cardType: string;
   /** 基础卡片 ID */
@@ -219,6 +223,18 @@ interface IframeI18nEnvelope {
   locale: string;
   version: string;
   payload: IframeVocabularyPayload;
+}
+
+function getTargetCard(): CardInfo | null {
+  if (props.cardId) {
+    return cardStore.getCard(props.cardId) ?? null;
+  }
+
+  return cardStore.activeCard;
+}
+
+function resolveTargetCardPath(card: CardInfo | null): string {
+  return resolveCardPath(card?.id, card?.filePath, resourceService.workspaceRoot);
 }
 
 async function resolveEditorResource(fullPath: string): Promise<string> {
@@ -438,8 +454,8 @@ async function ensureIframePermissionsLoaded(pluginId: string): Promise<void> {
  * 策略：优先使用 SDK ResourceManager（含缓存），失败时直接从 dev-file-server 获取。
  */
 const editorOptions = computed(() => {
-  const activeCard = cardStore.activeCard;
-  const cardPath = resolveCardPath(activeCard?.id, activeCard?.filePath);
+  const targetCard = getTargetCard();
+  const cardPath = resolveTargetCardPath(targetCard);
   return {
     toolbar: true,
     autoSave: true,
@@ -476,9 +492,9 @@ const useDefaultEditor = computed(() => {
 
 /** 当前基础卡片信息 */
 const currentBaseCard = computed(() => {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) return null;
-  return activeCard.structure.find(bc => bc.id === props.baseCardId) ?? null;
+  const targetCard = getTargetCard();
+  if (!targetCard) return null;
+  return targetCard.structure.find(bc => bc.id === props.baseCardId) ?? null;
 });
 
 /** 加载状态文本 */
@@ -696,12 +712,12 @@ async function handleImageCardConfigChange(newConfig: Record<string, unknown>): 
 
   // 如果有待上传的文件，通过 chips:// 协议写入卡片文件夹
   if (pendingFiles && Object.keys(pendingFiles).length > 0) {
-    const activeCard = cardStore.activeCard;
-    if (activeCard) {
-      const cardPath = resolveCardPath(activeCard.id, activeCard.filePath);
+    const targetCard = getTargetCard();
+    if (targetCard) {
+      const cardPath = resolveTargetCardPath(targetCard);
       if (!cardPath) {
         console.error('[PluginHost] Missing card path, skip pending resource write', {
-          cardId: activeCard.id,
+          cardId: targetCard.id,
         });
       } else if (typeof window === 'undefined' || !window.chips) {
         console.error('[PluginHost] Failed to save resources: window.chips is unavailable');
@@ -950,7 +966,8 @@ function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.va
     return false;
   }
 
-  const activeCard = cardStore.activeCard;
+  const targetCard = getTargetCard();
+  const cardPath = resolveTargetCardPath(targetCard);
   const locale = editorStore.locale ?? 'zh-CN';
   const i18n = buildI18nEnvelope(locale, vocabulary);
   return postMessageToIframe({
@@ -968,8 +985,8 @@ function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.va
         },
       },
       resources: {
-        cardId: activeCard?.id ?? '',
-        cardPath: activeCard?.filePath ?? '',
+        cardId: targetCard?.id ?? '',
+        cardPath,
       },
       locale: i18n.locale,
       vocabularyVersion: i18n.version,
@@ -1317,14 +1334,14 @@ function flushPendingConfigEmit(): void {
  * 更新 Store 中的配置
  */
 function updateStoreConfig(): void {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) return;
+  const targetCard = getTargetCard();
+  if (!targetCard) return;
   
-  const baseCardIndex = activeCard.structure.findIndex(bc => bc.id === props.baseCardId);
+  const baseCardIndex = targetCard.structure.findIndex(bc => bc.id === props.baseCardId);
   if (baseCardIndex === -1) return;
   
   // 创建新的 structure 数组
-  const newStructure = [...activeCard.structure];
+  const newStructure = [...targetCard.structure];
   const currentBaseCard = newStructure[baseCardIndex];
   if (!currentBaseCard) {
     return;
@@ -1335,21 +1352,27 @@ function updateStoreConfig(): void {
   };
   
   // 更新 store
-  cardStore.updateCardStructure(activeCard.id, newStructure);
+  cardStore.updateCardStructure(targetCard.id, newStructure);
   editorStore.markUnsaved();
 }
 
 async function persistCardConfig(): Promise<void> {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) {
+  const targetCard = getTargetCard();
+  if (!targetCard) {
     return;
   }
 
-  const cardPath = await saveCardToWorkspace(activeCard, activeCard.filePath);
-  if (!activeCard.filePath) {
-    cardStore.updateFilePath(activeCard.id, cardPath);
+  const cardPath = requireCardPath(
+    targetCard.id,
+    targetCard.filePath,
+    'PluginHost.persistCardConfig',
+    resourceService.workspaceRoot,
+  );
+  const persistedPath = await saveCardToWorkspace(targetCard, cardPath);
+  if (!targetCard.filePath) {
+    cardStore.updateFilePath(targetCard.id, persistedPath);
   }
-  cardStore.markCardSaved(activeCard.id);
+  cardStore.markCardSaved(targetCard.id);
   if (!cardStore.hasModifiedCards) {
     editorStore.markSaved();
   }
@@ -1387,10 +1410,10 @@ async function saveConfig(): Promise<void> {
     hasUnsavedChanges.value = false;
   } catch (error) {
     hasUnsavedChanges.value = true;
-    const activeCard = cardStore.activeCard;
-    const cardPath = resolveCardPath(activeCard?.id, activeCard?.filePath);
+    const targetCard = getTargetCard();
+    const cardPath = resolveTargetCardPath(targetCard);
     console.error('[PluginHost] Failed to persist card config', {
-      cardId: activeCard?.id ?? '',
+      cardId: targetCard?.id ?? '',
       baseCardId: props.baseCardId,
       cardPath,
       error,

@@ -80,6 +80,10 @@ describe('card-resource-resolver', () => {
     expect(buildCardResourceFullPath('/workspace/demo-card/', '')).toBe('/workspace/demo-card');
   });
 
+  it('buildCardResourceFullPath 在卡片路径为空时返回资源路径', () => {
+    expect(buildCardResourceFullPath('', '/images/photo.png')).toBe('images/photo.png');
+  });
+
   it('resolveCardResourceUrl 应通过 file.read 构造 object URL', async () => {
     readBinaryMock.mockResolvedValue(new Uint8Array([1, 2, 3]).buffer);
 

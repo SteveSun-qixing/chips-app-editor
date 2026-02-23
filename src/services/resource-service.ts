@@ -37,6 +37,14 @@ function normalizePath(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
 }
 
+function normalizeRootPath(path: string): string {
+  const normalized = normalizePath(path);
+  if (!normalized || normalized === '/') {
+    return normalized;
+  }
+  return normalized.replace(/\/+$/, '');
+}
+
 function isAbsolutePath(path: string): boolean {
   return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
 }
@@ -98,12 +106,20 @@ function resolveBridgePath(path: string): string {
   return normalizedPath;
 }
 
+function resolveRequiredBridgePath(path: string): string {
+  const resolvedPath = resolveBridgePath(path);
+  if (!resolvedPath || !isAbsolutePath(resolvedPath)) {
+    throw new Error(`[ResourceService] Path must resolve to an absolute path: ${path}`);
+  }
+  return resolvedPath;
+}
+
 /**
  * 设置工作区路径（由插件初始化时调用）
  */
 export function setWorkspacePaths(workspaceRoot: string, externalRoot: string): void {
-  _workspaceRoot = normalizePath(workspaceRoot);
-  _externalRoot = normalizePath(externalRoot);
+  _workspaceRoot = normalizeRootPath(workspaceRoot);
+  _externalRoot = normalizeRootPath(externalRoot);
 }
 
 async function ensureInitialized(): Promise<void> {
@@ -125,7 +141,7 @@ export const resourceService = {
 
   async readText(path: string): Promise<string> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request<{
       content: string;
       encoding: string;
@@ -143,7 +159,7 @@ export const resourceService = {
 
   async readBinary(path: string): Promise<ArrayBuffer> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request<{
       content: string;
       encoding: string;
@@ -167,7 +183,7 @@ export const resourceService = {
 
   async writeText(path: string, content: string): Promise<void> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'write',
@@ -180,7 +196,7 @@ export const resourceService = {
 
   async writeBinary(path: string, content: ArrayBuffer): Promise<void> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     // Encode ArrayBuffer to base64
     const bytes = new Uint8Array(content);
     let binary = '';
@@ -200,7 +216,7 @@ export const resourceService = {
 
   async ensureDir(path: string): Promise<void> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'mkdir',
@@ -213,7 +229,7 @@ export const resourceService = {
 
   async exists(path: string): Promise<boolean> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request<{ exists: boolean }>({
       service: 'file',
       method: 'exists',
@@ -224,7 +240,7 @@ export const resourceService = {
 
   async delete(path: string): Promise<void> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'delete',
@@ -237,7 +253,7 @@ export const resourceService = {
 
   async list(path: string): Promise<string[]> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (
       await getEditorConnector()
     ).request<{ entries: Array<{ name: string; type: string }> }>({
@@ -260,7 +276,7 @@ export const resourceService = {
     modified?: string;
   }> {
     await ensureInitialized();
-    const resolvedPath = resolveBridgePath(path);
+    const resolvedPath = resolveRequiredBridgePath(path);
     // First check if path exists
     const existsResponse = await (await getEditorConnector()).request<{ exists: boolean }>({
       service: 'file',
@@ -328,8 +344,8 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
-    const resolvedSourcePath = resolveBridgePath(sourcePath);
-    const resolvedOutputPath = resolveBridgePath(outputPath);
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.convertToHTML(
       { type: 'path', path: resolvedSourcePath, fileType: 'card' },
       { ...options, outputPath: resolvedOutputPath }
@@ -345,8 +361,8 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
-    const resolvedSourcePath = resolveBridgePath(sourcePath);
-    const resolvedOutputPath = resolveBridgePath(outputPath);
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.convertToPDF(
       { type: 'path', path: resolvedSourcePath, fileType: 'card' },
       { ...options, outputPath: resolvedOutputPath }
@@ -362,8 +378,8 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
-    const resolvedSourcePath = resolveBridgePath(sourcePath);
-    const resolvedOutputPath = resolveBridgePath(outputPath);
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.convertToImage(
       { type: 'path', path: resolvedSourcePath, fileType: 'card' },
       { ...options, outputPath: resolvedOutputPath }
@@ -375,14 +391,14 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
-    const resolvedOutputPath = resolveBridgePath(outputPath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.exportAsCard(cardId, { outputPath: resolvedOutputPath });
   },
 
   async copy(sourcePath: string, destPath: string): Promise<void> {
     await ensureInitialized();
-    const resolvedSourcePath = resolveBridgePath(sourcePath);
-    const resolvedDestPath = resolveBridgePath(destPath);
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedDestPath = resolveRequiredBridgePath(destPath);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'copy',
@@ -395,8 +411,8 @@ export const resourceService = {
 
   async move(sourcePath: string, destPath: string): Promise<void> {
     await ensureInitialized();
-    const resolvedSourcePath = resolveBridgePath(sourcePath);
-    const resolvedDestPath = resolveBridgePath(destPath);
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedDestPath = resolveRequiredBridgePath(destPath);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'move',

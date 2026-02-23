@@ -136,11 +136,17 @@ const DEBOUNCE_DELAY = 300;
 /** 自动保存间隔（毫秒） */
 const AUTO_SAVE_INTERVAL = 5000;
 
+/** 变更后主动落盘延迟（毫秒） */
+const PERSIST_DELAY = 800;
+
 /** iframe 请求 nonce 缓存上限 */
 const MAX_TRACKED_IFRAME_REQUEST_NONCES = 512;
 
 /** 自动保存定时器 */
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 主动落盘定时器 */
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 是否有未保存的更改 */
 const hasUnsavedChanges = ref(false);
@@ -647,6 +653,7 @@ function handleDefaultConfigChange(newConfig: Record<string, unknown>): void {
   localConfig.value = { ...newConfig };
   hasUnsavedChanges.value = true;
   debouncedEmitChange();
+  schedulePersist();
 }
 
 /**
@@ -663,6 +670,7 @@ function handleEditorContentChange(html: string): void {
   editorState.value.wordCount = html.replace(/<[^>]*>/g, '').length;
   hasUnsavedChanges.value = true;
   debouncedEmitChange();
+  schedulePersist();
 }
 
 /**
@@ -742,6 +750,7 @@ async function handleImageCardConfigChange(newConfig: Record<string, unknown>): 
   localConfig.value = { ...cleanConfig };
   hasUnsavedChanges.value = true;
   debouncedEmitChange();
+  schedulePersist();
 }
 
 function buildThemeCss(): string {
@@ -1213,6 +1222,8 @@ async function handleIframeConfigUpdate(
 
   if (persist) {
     await saveConfig();
+  } else {
+    schedulePersist();
   }
 }
 
@@ -1312,6 +1323,17 @@ function debouncedEmitChange(): void {
   }, DEBOUNCE_DELAY);
 }
 
+function schedulePersist(): void {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+  }
+
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void saveConfig();
+  }, PERSIST_DELAY);
+}
+
 /**
  * 发送配置变更事件
  */
@@ -1328,6 +1350,18 @@ function flushPendingConfigEmit(): void {
     debounceTimer = null;
   }
   emitConfigChange();
+}
+
+function clearPersistTimer(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
 }
 
 /**
@@ -1499,10 +1533,7 @@ onMounted(async () => {
 
 onUnmounted(async () => {
   window.removeEventListener('message', handleIframeMessage);
-  // 清理防抖定时器
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-  }
+  clearPersistTimer();
 
   if (hasUnsavedChanges.value) {
     await saveConfig();

@@ -41,8 +41,16 @@ describe('card-path-service', () => {
     );
   });
 
-  it('falls back to card id when workspace root is unavailable', () => {
-    expect(resolveCardPath('card-001')).toBe('card-001');
+  it('returns empty string when only relative file path is provided without workspace root', () => {
+    expect(resolveCardPath('card-001', 'relative/path')).toBe('');
+  });
+
+  it('returns empty string when only card id is provided without workspace root', () => {
+    expect(resolveCardPath('card-001')).toBe('');
+  });
+
+  it('returns empty string when file path and card id are both empty', () => {
+    expect(resolveCardPath('   ', '   ', WORKSPACE_ROOT)).toBe('');
   });
 
   it('requireCardPath returns explicit file path when available', () => {
@@ -53,6 +61,12 @@ describe('card-path-service', () => {
 
   it('requireCardPath throws when card id and file path are both missing', () => {
     expect(() => requireCardPath(undefined, undefined, 'unit-test')).toThrow(
+      '[CardPath] Missing card path for unit-test',
+    );
+  });
+
+  it('requireCardPath throws when workspace root is missing and only card id is provided', () => {
+    expect(() => requireCardPath('card-001', undefined, 'unit-test')).toThrow(
       '[CardPath] Missing card path for unit-test',
     );
   });

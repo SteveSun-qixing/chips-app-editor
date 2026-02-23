@@ -16,6 +16,7 @@ import {
   stringifyBaseCardContentYaml,
 } from './base-card-content-loader';
 import type { EditorConfig, EditorState, LayoutType, WindowConfig } from '@/types';
+import yaml from 'yaml';
 
 type RuntimeEditorConfig = Omit<Required<EditorConfig>, 'sdk'> & Pick<EditorConfig, 'sdk'>;
 
@@ -312,7 +313,6 @@ export class ChipsEditor {
       throw new Error(`Card not found: ${cardId}`);
     }
 
-    const sdk = this.connector.getSDK();
     const path = requireCardPath(
       cardId,
       options.path ?? cardInfo.filePath,
@@ -348,31 +348,38 @@ export class ChipsEditor {
       }
     }
 
-    // 构建卡片数据
-    const card: SDKCard = {
-      id: cardInfo.id,
-      metadata: cardInfo.metadata,
-      structure: {
-        structure: cardInfo.structure,
-        manifest: {
-          card_count: cardInfo.structure.length,
-          resource_count: resourcePaths.length,
-          resources: resourcePaths.map(rp => ({
-            path: rp,
-            size: 0,
-            type: rp.match(/\.(jpe?g|png|gif|webp|svg|bmp|ico)$/i) ? 'image' : 'other',
-          })),
-        },
+    const modifiedAt = new Date().toISOString();
+    const metadataPayload = {
+      ...cardInfo.metadata,
+      card_id: cardInfo.id,
+      modified_at: modifiedAt,
+    };
+    const structurePayload = {
+      structure: cardInfo.structure.map((baseCard) => ({
+        id: baseCard.id,
+        type: baseCard.type,
+      })),
+      manifest: {
+        card_count: cardInfo.structure.length,
+        resource_count: resourcePaths.length,
+        resources: resourcePaths.map((resourcePath) => ({
+          path: resourcePath,
+          size: 0,
+          type: resourcePath.match(/\.(jpe?g|png|gif|webp|svg|bmp|ico)$/i) ? 'image' : 'other',
+        })),
       },
-      resources: new Map(),
     };
 
-    await sdk.card.save(path, card, { overwrite: true });
+    const metaDir = `${path}/.card`;
+    const contentDir = `${path}/content`;
+    await resourceService.ensureDir(metaDir);
+    await resourceService.ensureDir(contentDir);
+    await resourceService.writeText(`${metaDir}/metadata.yaml`, yaml.stringify(metadataPayload));
+    await resourceService.writeText(`${metaDir}/structure.yaml`, yaml.stringify(structurePayload));
 
     // 写入每个基础卡片的内容文件 content/{id}.yaml
     // 基础卡片的实际内容存储在 BaseCardInfo.config 中，
     // 需要同步到磁盘上的 content/{id}.yaml 文件
-    const contentDir = `${path}/content`;
     for (const baseCard of cardInfo.structure) {
       const contentYaml = stringifyBaseCardContentYaml(baseCard.type, baseCard.config);
       const contentFilePath = `${contentDir}/${baseCard.id}.yaml`;

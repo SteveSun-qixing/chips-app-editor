@@ -152,6 +152,63 @@ const {
 
 // Mock @chips/sdk
 vi.mock('@chips/sdk', () => {
+  const resolvePluginEntryUrl = vi.fn(
+    async (
+      pluginId: string,
+      entryPath: string,
+      options?: {
+        pluginResolver?: { resolveFileUrl?: (pluginId: string, relativePath: string) => Promise<string> } | null;
+        onResolveError?: (error: unknown) => void;
+      },
+    ): Promise<string | null> => {
+      const normalizedPath = entryPath.trim();
+      if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(normalizedPath)) {
+        return normalizedPath;
+      }
+      if (normalizedPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(normalizedPath)) {
+        const normalized = normalizedPath.replace(/\\/g, '/');
+        if (/^[a-zA-Z]:\//.test(normalized)) {
+          return `file:///${encodeURI(normalized)}`;
+        }
+        return `file://${encodeURI(normalized)}`;
+      }
+      const resolver = options?.pluginResolver;
+      if (!resolver?.resolveFileUrl) {
+        return null;
+      }
+      try {
+        return await resolver.resolveFileUrl(pluginId, normalizedPath);
+      } catch (error) {
+        options?.onResolveError?.(error);
+        return null;
+      }
+    },
+  );
+
+  const fetchPluginEntryText = vi.fn(
+    async (
+      entryUrl: string,
+      options?: {
+        fetchImpl?: ((input: string, init?: RequestInit) => Promise<Response>) | null;
+      },
+    ): Promise<string | null> => {
+      const fetchImpl = options?.fetchImpl ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null);
+      if (!fetchImpl) {
+        return null;
+      }
+      try {
+        const response = await fetchImpl(entryUrl);
+        if (!response.ok) {
+          return null;
+        }
+        const text = await response.text();
+        return text.trim().length > 0 ? text : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+
   class ChipsSDK {
     version = '1.0.0';
     connector: MockCoreConnector;
@@ -342,6 +399,8 @@ vi.mock('@chips/sdk', () => {
     EventBus: MockEventBus,
     ResourceManager: MockResourceManager,
     ConversionAPI: MockConversionAPI,
+    resolvePluginEntryUrl,
+    fetchPluginEntryText,
   };
 });
 

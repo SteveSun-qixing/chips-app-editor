@@ -8,7 +8,12 @@
  */
 
 import type { Component } from 'vue';
-import type { ChipsSDK, PluginRegistration } from '@chips/sdk';
+import {
+  fetchPluginEntryText,
+  resolvePluginEntryUrl,
+  type ChipsSDK,
+  type PluginRegistration,
+} from '@chips/sdk';
 import { parse as parseYaml } from 'yaml';
 import { getEditorSdk } from './sdk-service';
 
@@ -155,26 +160,11 @@ function normalizeCardType(cardType: string): string {
   return pluginIdToCardType.get(cardType) ?? cardType;
 }
 
-function isAbsoluteUrl(value: string): boolean {
-  return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
-}
-
-function isAbsoluteFilePath(value: string): boolean {
-  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value);
-}
-
-function toFileUrl(filePath: string): string {
-  const normalized = filePath.replace(/\\/g, '/');
-
-  if (/^[a-zA-Z]:\//.test(normalized)) {
-    return `file:///${encodeURI(normalized)}`;
+function resolveBridgePlugin() {
+  if (typeof window === 'undefined' || !window.chips) {
+    return null;
   }
-
-  if (normalized.startsWith('/')) {
-    return `file://${encodeURI(normalized)}`;
-  }
-
-  return `file:///${encodeURI(normalized)}`;
+  return window.chips.plugin;
 }
 
 function isHtmlEntryPath(entryPath: string): boolean {
@@ -182,27 +172,15 @@ function isHtmlEntryPath(entryPath: string): boolean {
 }
 
 async function resolvePluginEntryPath(pluginId: string, entryPath: string): Promise<string | null> {
-  if (isAbsoluteUrl(entryPath)) {
-    return entryPath;
-  }
-
-  if (isAbsoluteFilePath(entryPath)) {
-    return toFileUrl(entryPath);
-  }
-
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
-  }
-
-  try {
-    return await window.chips.plugin.resolveFileUrl(pluginId, entryPath);
-  } catch (error) {
-    console.warn(
-      `[PluginService] Failed to resolve plugin file URL for "${pluginId}" and "${entryPath}":`,
-      error
-    );
-    return null;
-  }
+  return resolvePluginEntryUrl(pluginId, entryPath, {
+    pluginResolver: resolveBridgePlugin(),
+    onResolveError: (error) => {
+      console.warn(
+        `[PluginService] Failed to resolve plugin file URL for "${pluginId}" and "${entryPath}":`,
+        error
+      );
+    },
+  });
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -222,15 +200,7 @@ async function fetchPluginTextFile(pluginId: string, relativePath: string): Prom
     return null;
   }
 
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return null;
-    }
-    return await response.text();
-  } catch {
-    return null;
-  }
+  return fetchPluginEntryText(url);
 }
 
 async function loadPluginManifest(pluginId: string): Promise<Record<string, unknown> | null> {

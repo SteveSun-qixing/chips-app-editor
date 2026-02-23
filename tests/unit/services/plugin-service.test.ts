@@ -24,6 +24,7 @@ import {
 function installBridgeMock(overrides?: {
   list?: ReturnType<typeof vi.fn>;
   getCardPlugin?: ReturnType<typeof vi.fn>;
+  getCardRuntimeContext?: ReturnType<typeof vi.fn>;
   resolveFileUrl?: ReturnType<typeof vi.fn>;
 }): void {
   (window as typeof window & { chips?: unknown }).chips = {
@@ -47,6 +48,7 @@ function installBridgeMock(overrides?: {
           rendererPath: 'dist/renderer/index.html',
           editorPath: 'dist/editor/index.html',
         }),
+      getCardRuntimeContext: overrides?.getCardRuntimeContext,
       resolveFileUrl:
         overrides?.resolveFileUrl ??
         vi.fn().mockResolvedValue(
@@ -76,6 +78,46 @@ describe('plugin-service', () => {
     expect(runtime).toBeTruthy();
     expect(runtime?.mode).toBe('iframe');
     expect(runtime?.iframeUrl).toBe('chips://plugin/chips-official.rich-text-card/dist/editor/index.html');
+  });
+
+  it('prefers plugin runtime context channel when available', async () => {
+    const getCardRuntimeContext = vi.fn().mockResolvedValue({
+      pluginId: 'chips-official.rich-text-card',
+      cardType: 'RichTextCard',
+      rendererPath: 'dist/renderer/index.html',
+      rendererUrl: 'chips://plugin/chips-official.rich-text-card/dist/renderer/index.html',
+      editorPath: 'dist/editor/index.html',
+      editorUrl: 'chips://plugin/chips-official.rich-text-card/dist/editor/index.html',
+      permissions: ['resource.fetch', 'theme.read'],
+      locale: 'en-US',
+      vocabularyVersion: 3,
+      vocabulary: {
+        'toolbar.bold': 'Bold',
+      },
+      decisionSource: 'fallback',
+    });
+    const getCardPlugin = vi.fn().mockResolvedValue(null);
+    const resolveFileUrl = vi.fn();
+
+    installBridgeMock({
+      getCardRuntimeContext,
+      getCardPlugin,
+      resolveFileUrl,
+    });
+
+    const runtime = await getEditorRuntime('RichTextCard');
+    const permissions = await getCardPluginPermissions('chips-official.rich-text-card');
+    const vocabulary = await getLocalPluginVocabulary('chips-official.rich-text-card', 'en-US');
+
+    expect(runtime?.mode).toBe('iframe');
+    expect(runtime?.iframeUrl).toBe('chips://plugin/chips-official.rich-text-card/dist/editor/index.html');
+    expect(getCardRuntimeContext).toHaveBeenCalledWith('RichTextCard', undefined);
+    expect(getCardPlugin).not.toHaveBeenCalled();
+    expect(resolveFileUrl).not.toHaveBeenCalled();
+    expect(Array.from(permissions.values())).toEqual(['resource.fetch', 'theme.read']);
+    expect(vocabulary).toEqual({
+      'toolbar.bold': 'Bold',
+    });
   });
 
   it('returns null component for iframe runtime', async () => {

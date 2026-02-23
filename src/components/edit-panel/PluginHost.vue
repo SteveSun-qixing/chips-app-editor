@@ -9,7 +9,20 @@
  * - 根据基础卡片类型动态加载对应的编辑器组件
  */
 
-import { ref, computed, watch, onMounted, onUnmounted, shallowRef, nextTick, markRaw, type Component } from 'vue';
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onUnmounted,
+  shallowRef,
+  nextTick,
+  markRaw,
+  isRef,
+  isProxy,
+  toRaw,
+  type Component,
+} from 'vue';
 import { Button } from '@chips/components';
 import { useCardStore, useEditorStore, useUIStore } from '@/core/state';
 import DefaultEditor from './DefaultEditor.vue';
@@ -720,12 +733,118 @@ function buildThemeCss(): string {
   return cssText ? `:root { ${cssText} }` : '';
 }
 
-function postMessageToIframe(message: Record<string, unknown>): void {
+function normalizePostMessageValue(
+  value: unknown,
+  seen: WeakMap<object, unknown> = new WeakMap()
+): unknown {
+  if (isRef(value)) {
+    return normalizePostMessageValue(value.value, seen);
+  }
+
+  if (
+    value === null
+    || value === undefined
+    || typeof value === 'string'
+    || typeof value === 'number'
+    || typeof value === 'boolean'
+    || typeof value === 'bigint'
+  ) {
+    return value;
+  }
+
+  if (typeof value === 'symbol' || typeof value === 'function') {
+    return undefined;
+  }
+
+  const rawValue = isProxy(value) ? toRaw(value as object) : value;
+  if (typeof rawValue !== 'object' || rawValue === null) {
+    return rawValue;
+  }
+
+  if (
+    rawValue instanceof Date
+    || rawValue instanceof RegExp
+    || rawValue instanceof Blob
+    || (typeof File !== 'undefined' && rawValue instanceof File)
+    || rawValue instanceof ArrayBuffer
+    || ArrayBuffer.isView(rawValue)
+  ) {
+    return rawValue;
+  }
+
+  if (seen.has(rawValue)) {
+    return seen.get(rawValue);
+  }
+
+  if (Array.isArray(rawValue)) {
+    const normalizedArray: unknown[] = [];
+    seen.set(rawValue, normalizedArray);
+    for (const item of rawValue) {
+      normalizedArray.push(normalizePostMessageValue(item, seen));
+    }
+    return normalizedArray;
+  }
+
+  if (rawValue instanceof Map) {
+    const normalizedMap = new Map<unknown, unknown>();
+    seen.set(rawValue, normalizedMap);
+    for (const [key, item] of rawValue.entries()) {
+      const normalizedItem = normalizePostMessageValue(item, seen);
+      if (normalizedItem !== undefined) {
+        normalizedMap.set(key, normalizedItem);
+      }
+    }
+    return normalizedMap;
+  }
+
+  if (rawValue instanceof Set) {
+    const normalizedSet = new Set<unknown>();
+    seen.set(rawValue, normalizedSet);
+    for (const item of rawValue.values()) {
+      const normalizedItem = normalizePostMessageValue(item, seen);
+      if (normalizedItem !== undefined) {
+        normalizedSet.add(normalizedItem);
+      }
+    }
+    return normalizedSet;
+  }
+
+  const normalizedObject: Record<string, unknown> = {};
+  seen.set(rawValue, normalizedObject);
+  for (const [key, item] of Object.entries(rawValue as Record<string, unknown>)) {
+    const normalizedItem = normalizePostMessageValue(item, seen);
+    if (normalizedItem !== undefined) {
+      normalizedObject[key] = normalizedItem;
+    }
+  }
+  return normalizedObject;
+}
+
+function createCloneableMessagePayload<T>(message: T): T {
+  const normalized = normalizePostMessageValue(message);
+  if (typeof structuredClone === 'function') {
+    return structuredClone(normalized) as T;
+  }
+  return JSON.parse(JSON.stringify(normalized)) as T;
+}
+
+function postMessageToIframe(message: Record<string, unknown>): boolean {
   const iframeWindow = pluginIframeRef.value?.contentWindow;
   if (!iframeWindow) {
-    return;
+    return false;
   }
-  iframeWindow.postMessage(message, getIframeTargetOrigin());
+
+  try {
+    const cloneablePayload = createCloneableMessagePayload(message);
+    iframeWindow.postMessage(cloneablePayload, getIframeTargetOrigin());
+    return true;
+  } catch (error) {
+    console.error('[PluginHost] Failed to postMessage to iframe', {
+      type: message.type,
+      error,
+    });
+    return false;
+  }
 }
 
 function toStringRecord(value: unknown): Record<string, string> | null {
@@ -826,15 +945,15 @@ async function loadIframeVocabulary(locale: string): Promise<Record<string, stri
   return resolvedVocabulary;
 }
 
-function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): void {
+function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): boolean {
   if (!useIframeEditor.value) {
-    return;
+    return false;
   }
 
   const activeCard = cardStore.activeCard;
   const locale = editorStore.locale ?? 'zh-CN';
   const i18n = buildI18nEnvelope(locale, vocabulary);
-  postMessageToIframe({
+  return postMessageToIframe({
     type: 'init',
     payload: {
       config: { ...localConfig.value },
@@ -1146,10 +1265,20 @@ function handleIframeMessage(event: MessageEvent): void {
 }
 
 async function handleIframeLoad(): Promise<void> {
-  const locale = editorStore.locale ?? 'zh-CN';
-  const vocabulary = await loadIframeVocabulary(locale);
-  sendIframeInit(vocabulary);
-  postIframeLanguageChange(locale, vocabulary);
+  try {
+    const locale = editorStore.locale ?? 'zh-CN';
+    const vocabulary = await loadIframeVocabulary(locale);
+    const initSent = sendIframeInit(vocabulary);
+    if (!initSent) {
+      throw new Error('Failed to send iframe init message');
+    }
+    postIframeLanguageChange(locale, vocabulary);
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    loadError.value = resolvedError;
+    emit('plugin-error', resolvedError);
+    console.error('[PluginHost] Failed to initialize iframe editor', resolvedError);
+  }
 }
 
 /**

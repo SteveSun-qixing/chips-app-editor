@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { nextTick } from 'vue';
+import { nextTick, reactive } from 'vue';
 import PluginHost from '@/components/edit-panel/PluginHost.vue';
 import { useCardStore, useEditorStore } from '@/core/state';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
@@ -503,6 +503,86 @@ describe('PluginHost', () => {
   });
 
   describe('iframe 安全桥接', () => {
+    it('init 消息应归一化响应式配置并保持可克隆', async () => {
+      editorStore.setLocale('en-US');
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+      getLocalPluginVocabularyMock.mockResolvedValue({
+        'toolbar.bold': 'Bold',
+      });
+
+      const reactiveConfig = reactive({
+        sections: reactive([
+          reactive({
+            title: '封面',
+            path: 'images/photo.png',
+          }),
+        ]),
+      });
+
+      wrapper = mountComponent({
+        cardType: 'RichTextCard',
+        config: reactiveConfig as unknown as Record<string, unknown>,
+      });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      const postMessage = vi.fn((message: unknown) => {
+        expect(() => structuredClone(message)).not.toThrow();
+      });
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: { postMessage },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(postMessage).toHaveBeenCalled();
+      const initPayload = postMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(initPayload.type).toBe('init');
+      expect((initPayload.payload as Record<string, unknown>).config).toEqual({
+        sections: [
+          {
+            title: '封面',
+            path: 'images/photo.png',
+          },
+        ],
+      });
+      expect(vm.loadError).toBeNull();
+    });
+
+    it('init 消息发送失败时应设置错误并触发 plugin-error', async () => {
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: {
+          postMessage: vi.fn(() => {
+            throw new Error('postMessage failed');
+          }),
+        },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(vm.loadError).toBeInstanceOf(Error);
+      expect((vm.loadError as Error).message).toContain('Failed to send iframe init message');
+      expect(wrapper.emitted('plugin-error')).toBeTruthy();
+    });
+
     it('应拒绝未声明权限的 bridge 请求', async () => {
       getEditorRuntimeMock.mockResolvedValue({
         mode: 'iframe',

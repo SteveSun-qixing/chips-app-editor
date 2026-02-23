@@ -17,6 +17,21 @@ describe('Card Box Library Data', () => {
       expect(cardTypes.length).toBeGreaterThan(0);
     });
 
+    it('should map card type id from capabilities.cardType', () => {
+      const richText = cardTypes.find((type) => type.id === 'RichTextCard');
+      expect(richText).toBeTruthy();
+    });
+
+    it('should exclude template and archive manifests', () => {
+      const ids = cardTypes.map((type) => type.id);
+      expect(ids).not.toContain('SampleCard');
+      expect(ids).not.toContain('TemplateCard');
+
+      const names = cardTypes.map((type) => type.name);
+      expect(names).not.toContain('Sample Card');
+      expect(names).not.toContain('i18n.plugin.template_card.name');
+    });
+
     it('should have required fields for each type', () => {
       cardTypes.forEach((type) => {
         expect(type.id).toBeTruthy();

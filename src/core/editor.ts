@@ -10,6 +10,7 @@ import { SDKConnector, createConnector } from './connector';
 import { EventEmitter, createEventEmitter } from './event-manager';
 import { useEditorStore, useCardStore, useUIStore } from './state';
 import { resourceService } from '@/services/resource-service';
+import { requireCardPath } from '@/services/card-path-service';
 import {
   loadBaseCardConfigsFromContent,
   stringifyBaseCardContentYaml,
@@ -312,7 +313,12 @@ export class ChipsEditor {
     }
 
     const sdk = this.connector.getSDK();
-    const path = options.path ?? cardInfo.filePath ?? `TestWorkspace/${cardId}.card`;
+    const path = requireCardPath(
+      cardId,
+      options.path ?? cardInfo.filePath,
+      'ChipsEditor.saveCard',
+      resourceService.workspaceRoot,
+    );
 
     // 收集所有基础卡片引用的资源文件路径
     const resourcePaths: string[] = [];

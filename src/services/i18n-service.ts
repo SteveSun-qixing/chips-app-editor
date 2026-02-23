@@ -4,6 +4,7 @@
  */
 
 import type { ChipsSDK } from '@chips/sdk';
+import { ref } from 'vue';
 import { getEditorSdk } from './sdk-service';
 import { zhCN, enUS } from '@/i18n/editor';
 
@@ -18,6 +19,7 @@ let initialized = false;
 let sdkInstance: ChipsSDK | null = null;
 let currentLocale = normalizeLocale(getBrowserLocale() ?? DEFAULT_LOCALE);
 let pendingLocale: string | null = null;
+const i18nRevision = ref(0);
 
 type TranslationTable = Record<string, unknown>;
 
@@ -118,9 +120,13 @@ export async function initializeEditorI18n(locale?: string): Promise<void> {
   currentLocale = targetLocale;
   pendingLocale = null;
   sdk.setLocale(targetLocale);
+  i18nRevision.value += 1;
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
+  const revision = i18nRevision.value;
+  void revision;
+
   if (!sdkInstance) {
     return getLocalTranslation(key, params) ?? key;
   }
@@ -135,9 +141,11 @@ export function setLocale(locale: string): void {
   if (!sdkInstance) {
     currentLocale = normalizeLocale(locale);
     pendingLocale = currentLocale;
+    i18nRevision.value += 1;
     return;
   }
   currentLocale = normalizeLocale(locale);
   pendingLocale = null;
   sdkInstance.setLocale(currentLocale);
+  i18nRevision.value += 1;
 }

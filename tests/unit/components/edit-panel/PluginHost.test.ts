@@ -9,6 +9,19 @@ import { createPinia, setActivePinia } from 'pinia';
 import { nextTick } from 'vue';
 import PluginHost from '@/components/edit-panel/PluginHost.vue';
 import { useCardStore, useEditorStore } from '@/core/state';
+import { saveCardToWorkspace } from '@/services/card-persistence-service';
+
+const { getEditorRuntimeMock, getLocalPluginVocabularyMock, getCardPluginPermissionsMock } = vi.hoisted(() => ({
+  getEditorRuntimeMock: vi.fn(),
+  getLocalPluginVocabularyMock: vi.fn(),
+  getCardPluginPermissionsMock: vi.fn(),
+}));
+
+vi.mock('@/services/plugin-service', () => ({
+  getEditorRuntime: getEditorRuntimeMock,
+  getLocalPluginVocabulary: getLocalPluginVocabularyMock,
+  getCardPluginPermissions: getCardPluginPermissionsMock,
+}));
 
 // Mock DefaultEditor 组件
 vi.mock('@/components/edit-panel/DefaultEditor.vue', () => ({
@@ -18,6 +31,10 @@ vi.mock('@/components/edit-panel/DefaultEditor.vue', () => ({
     emits: ['config-change', 'validation'],
     template: '<div class="mock-default-editor" data-testid="default-editor"><slot /></div>',
   },
+}));
+
+vi.mock('@/services/card-persistence-service', () => ({
+  saveCardToWorkspace: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe('PluginHost', () => {
@@ -39,6 +56,15 @@ describe('PluginHost', () => {
 
     // 清除定时器 mock
     vi.useFakeTimers();
+
+    vi.mocked(saveCardToWorkspace).mockReset();
+    vi.mocked(saveCardToWorkspace).mockResolvedValue(undefined);
+    getEditorRuntimeMock.mockReset();
+    getEditorRuntimeMock.mockResolvedValue(null);
+    getLocalPluginVocabularyMock.mockReset();
+    getLocalPluginVocabularyMock.mockResolvedValue(null);
+    getCardPluginPermissionsMock.mockReset();
+    getCardPluginPermissionsMock.mockResolvedValue(new Set());
   });
 
   afterEach(() => {
@@ -254,6 +280,313 @@ describe('PluginHost', () => {
 
       // 保存后应该重置未保存状态
       expect(vm.hasUnsavedChanges).toBe(false);
+    });
+  });
+
+  describe('落盘保存', () => {
+    it('saveConfig 成功后应调用落盘服务', async () => {
+      wrapper = mountComponent();
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.isLoading = false;
+      vm.localConfig = { text: 'Persisted content' };
+      vm.hasUnsavedChanges = true;
+
+      await vm.saveConfig();
+
+      expect(saveCardToWorkspace).toHaveBeenCalledTimes(1);
+      expect(vm.hasUnsavedChanges).toBe(false);
+    });
+
+    it('落盘失败时应保留未保存状态', async () => {
+      vi.mocked(saveCardToWorkspace).mockRejectedValueOnce(new Error('persist failed'));
+
+      wrapper = mountComponent();
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.isLoading = false;
+      vm.localConfig = { text: 'Will fail' };
+      vm.hasUnsavedChanges = true;
+
+      await vm.saveConfig();
+
+      expect(saveCardToWorkspace).toHaveBeenCalledTimes(1);
+      expect(vm.hasUnsavedChanges).toBe(true);
+    });
+
+    it('连续保存请求应串行执行', async () => {
+      let resolveFirstSave: (() => void) | null = null;
+      const firstSavePromise = new Promise<void>((resolve) => {
+        resolveFirstSave = resolve;
+      });
+
+      vi.mocked(saveCardToWorkspace)
+        .mockImplementationOnce(() => firstSavePromise)
+        .mockResolvedValueOnce(undefined);
+
+      wrapper = mountComponent();
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.isLoading = false;
+      vm.localConfig = { text: 'First' };
+      vm.hasUnsavedChanges = true;
+
+      const first = vm.saveConfig();
+      await nextTick();
+
+      vm.localConfig = { text: 'Second' };
+      vm.hasUnsavedChanges = true;
+      const second = vm.saveConfig();
+
+      expect(saveCardToWorkspace).toHaveBeenCalledTimes(1);
+
+      resolveFirstSave?.();
+      await Promise.all([first, second]);
+
+      expect(saveCardToWorkspace).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('iframe 多语言桥接', () => {
+    it('iframe load 时应在 init 和 language-change 消息中传递 vocabulary', async () => {
+      editorStore.setLocale('en-US');
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+      getLocalPluginVocabularyMock.mockResolvedValue({
+        'toolbar.bold': 'Bold',
+        'dialog.confirm': 'Confirm',
+      });
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      const iframe = wrapper.find('iframe');
+      expect(iframe.exists()).toBe(true);
+
+      const postMessage = vi.fn();
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: { postMessage },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(postMessage).toHaveBeenCalledTimes(2);
+      expect(postMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          type: 'init',
+          payload: expect.objectContaining({
+            locale: 'en-US',
+            vocabularyVersion: expect.any(String),
+            vocabulary: {
+              'toolbar.bold': 'Bold',
+              'dialog.confirm': 'Confirm',
+            },
+            i18n: expect.objectContaining({
+              locale: 'en-US',
+              version: expect.any(String),
+              payload: {
+                mode: 'full',
+                vocabulary: {
+                  'toolbar.bold': 'Bold',
+                  'dialog.confirm': 'Confirm',
+                },
+              },
+            }),
+          }),
+        }),
+        'https://example.com'
+      );
+      expect(postMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          type: 'language-change',
+          pluginId: 'chips-official.rich-text-card',
+          sessionNonce: expect.any(String),
+          locale: 'en-US',
+          vocabularyVersion: expect.any(String),
+          vocabulary: {
+            'toolbar.bold': 'Bold',
+            'dialog.confirm': 'Confirm',
+          },
+          i18n: expect.objectContaining({
+            locale: 'en-US',
+            version: expect.any(String),
+            payload: {
+              mode: 'full',
+              vocabulary: {
+                'toolbar.bold': 'Bold',
+                'dialog.confirm': 'Confirm',
+              },
+            },
+          }),
+        }),
+        'https://example.com'
+      );
+    });
+
+    it('host 词汇为变量名时应回退本地词汇', async () => {
+      editorStore.setLocale('en-US');
+      (window as typeof window & { chips?: unknown }).chips = {
+        invoke: vi.fn().mockResolvedValue({
+          'toolbar.bold': 'toolbar.bold',
+          'dialog.confirm': 'dialog.confirm',
+        }),
+      };
+
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+      getLocalPluginVocabularyMock.mockResolvedValue({
+        'toolbar.bold': 'Bold',
+        'dialog.confirm': 'Confirm',
+      });
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: { postMessage: vi.fn() },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(vm.iframeVocabulary).toEqual({
+        'toolbar.bold': 'Bold',
+        'dialog.confirm': 'Confirm',
+      });
+    });
+
+    it('host 词汇仅返回变量名且无本地词汇时应忽略该词条', async () => {
+      editorStore.setLocale('en-US');
+      (window as typeof window & { chips?: unknown }).chips = {
+        invoke: vi.fn().mockResolvedValue({
+          'toolbar.bold': 'toolbar.bold',
+        }),
+      };
+
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+      getLocalPluginVocabularyMock.mockResolvedValue(null);
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: { postMessage: vi.fn() },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(vm.iframeVocabulary).toEqual({});
+    });
+  });
+
+  describe('iframe 安全桥接', () => {
+    it('应拒绝未声明权限的 bridge 请求', async () => {
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+      getCardPluginPermissionsMock.mockResolvedValue(new Set());
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      const postMessage = vi.fn();
+      const iframeWindow = {} as Window;
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: iframeWindow,
+      };
+      vm.pluginIframeRef.contentWindow.postMessage = postMessage;
+
+      await vm.handleIframeBridgeRequest({
+        type: 'bridge-request',
+        pluginId: vm.iframePluginId,
+        sessionNonce: vm.iframeSessionNonce,
+        requestNonce: 'req-1',
+        requestId: 'request-1',
+        namespace: 'resource',
+        action: 'fetch',
+        params: { uri: 'chips://test' },
+      });
+
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'bridge-response',
+          requestId: 'request-1',
+          error: expect.objectContaining({
+            code: 'BRIDGE_PERMISSION_DENIED',
+          }),
+        }),
+        'https://example.com'
+      );
+    });
+
+    it('应拦截非可信 origin 的消息', async () => {
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+
+      const invokeMock = vi.fn().mockResolvedValue({});
+      (window as typeof window & { chips?: unknown }).chips = {
+        invoke: invokeMock,
+      };
+
+      const postMessage = vi.fn();
+      const iframeWindow = {} as Window;
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: iframeWindow,
+      };
+      vm.pluginIframeRef.contentWindow.postMessage = postMessage;
+
+      vm.handleIframeMessage({
+        source: iframeWindow,
+        origin: 'https://attacker.example.com',
+        data: {
+          type: 'bridge-request',
+          pluginId: vm.iframePluginId,
+          sessionNonce: vm.iframeSessionNonce,
+          requestNonce: 'req-1',
+          requestId: 'request-1',
+          namespace: 'resource',
+          action: 'fetch',
+        },
+      });
+      await nextTick();
+
+      expect(invokeMock).not.toHaveBeenCalled();
+      expect(postMessage).not.toHaveBeenCalled();
     });
   });
 

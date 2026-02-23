@@ -1,12 +1,20 @@
 <script setup lang="ts">
-/* eslint-disable vue/no-v-html */
 /**
  * 卡片窗口组件
  * @module components/window/CardWindow
  * @description 用于显示和编辑卡片内容的窗口组件
  */
 
-import { ref, computed, watch, onUnmounted, inject, type Ref } from 'vue';
+import {
+  ref,
+  computed,
+  watch,
+  onUnmounted,
+  inject,
+  nextTick,
+  type Ref,
+} from 'vue';
+import { CardRenderManager, RendererFetcher, type ParsedBaseCardConfig, type ParsedCardData } from '@chips/sdk';
 import CardWindowBase from './CardWindowBase.vue';
 import WindowMenu from './WindowMenu.vue';
 import { CardSettingsDialog } from '@/components/card-settings';
@@ -14,6 +22,8 @@ import { useCardStore } from '@/core/state';
 import { useWorkspaceService } from '@/core/workspace-service';
 import type { CardWindowConfig, WindowPosition, WindowSize } from '@/types';
 import { t } from '@/services/i18n-service';
+import { resolveBaseCardRuntimeType } from './base-card-runtime-type';
+import { sanitizeRichTextHtml } from './rich-text-sanitizer';
 import {
   buildCardResourceFullPath,
   isDirectResourceUrl,
@@ -25,6 +35,13 @@ import {
 interface Props {
   /** 窗口配置 */
   config: CardWindowConfig;
+}
+
+interface ImageItemConfig {
+  url?: string;
+  file_path?: string;
+  alt?: string;
+  title?: string;
 }
 
 const props = defineProps<Props>();
@@ -40,6 +57,14 @@ const emit = defineEmits<{
 
 const cardStore = useCardStore();
 const workspaceService = useWorkspaceService();
+
+const previewContainer = ref<HTMLElement | null>(null);
+const previewRenderError = ref<string | null>(null);
+
+const previewFetcher = new RendererFetcher({ enableCache: true });
+let previewDestroy: (() => void) | null = null;
+let previewRenderVersion = 0;
+let scheduledPreviewRenderVersion = 0;
 
 // 从 InfiniteCanvas 注入画布上下文（获取缩放比例）
 const canvasContext = inject<{
@@ -176,13 +201,8 @@ function updateSize(size: WindowSize): void {
  */
 function updateTitle(title: string): void {
   if (cardInfo.value) {
-    // 更新卡片元数据
     cardStore.updateCardMetadata(props.config.cardId, { name: title });
-    
-    // 同步更新工作区文件名（使用相同的 cardId 作为文件 ID）
     workspaceService.renameFile(props.config.cardId, `${title}.card`);
-    
-    console.warn('[CardWindow] 更新卡片名称:', title, 'ID:', props.config.cardId);
   }
 }
 
@@ -237,12 +257,19 @@ function handleCloseSettings(): void {
  * 同时设置活动卡片，确保编辑面板能正确显示
  */
 function selectBaseCard(baseCardId: string): void {
-  // 先设置活动卡片
+  if (!isEditing.value) return;
   cardStore.setActiveCard(props.config.cardId);
-  // 再设置选中的基础卡片
   cardStore.setSelectedBaseCard(baseCardId);
-  
-  console.warn('[CardWindow] 选中基础卡片:', baseCardId, '卡片ID:', props.config.cardId);
+}
+
+function handlePreviewClick(event: MouseEvent): void {
+  if (!isEditing.value) return;
+  const target = event.target as HTMLElement | null;
+  const baseCardElement = target?.closest<HTMLElement>('.chips-base-card-wrapper[data-card-id]');
+  const baseCardId = baseCardElement?.dataset.cardId;
+  if (baseCardId) {
+    selectBaseCard(baseCardId);
+  }
 }
 
 /**
@@ -252,153 +279,60 @@ function getCoverAspectRatio(ratio?: string): string {
   return ratio?.replace(':', '/') || '3/4';
 }
 
-/**
- * 获取基础卡片类型名称
- */
-function getBaseCardTypeName(type: string): string {
-  // 类型名统一使用 PascalCase（卡片文件格式规范标准）
-  const typeNames: Record<string, string> = {
-    RichTextCard: t('card_window.type_rich_text'),
-    MarkdownCard: t('card_window.type_markdown'),
-    ImageCard: t('card_window.type_image'),
-    VideoCard: t('card_window.type_video'),
-    AudioCard: t('card_window.type_audio'),
-    CodeBlockCard: t('card_window.type_code'),
-    ListCard: t('card_window.type_list'),
-  };
-  return typeNames[type] || type;
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * 获取富文本预览内容
- * 兼容历史错误内容（i18n key 直接写入内容）
- */
-function getRichTextPreview(baseCard: { config?: Record<string, unknown> }): string {
-  const rawContent = typeof baseCard.config?.content_text === 'string'
-    ? baseCard.config?.content_text
-    : '';
-  const placeholderKey = 'card_window.richtext_placeholder';
-
-  if (!rawContent || rawContent.trim() === '' || rawContent.trim() === placeholderKey) {
-    return `<p>${t(placeholderKey)}</p>`;
+function cloneConfig(config?: Record<string, unknown>): Record<string, unknown> {
+  if (!config) return {};
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(config);
+    } catch {
+      // ignore and fallback below
+    }
   }
 
-  return rawContent;
-}
-
-// ======================================================================
-// 图片卡片预览辅助函数
-// ======================================================================
-
-interface ImageItemPreview {
-  url?: string;
-  file_path?: string;
-  alt?: string;
-  title?: string;
-  _overflow?: boolean;
-  _overflowCount?: number;
-}
-
-/** 获取图片卡片的图片数组 */
-function getImageCardImages(baseCard: { config?: Record<string, unknown> }): ImageItemPreview[] {
-  const images = baseCard.config?.images;
-  return Array.isArray(images) ? images as ImageItemPreview[] : [];
-}
-
-/** 获取图片卡片的有效排版类型 */
-function getImageEffectiveLayout(baseCard: { config?: Record<string, unknown> }): string {
-  const images = getImageCardImages(baseCard);
-  if (images.length <= 1) return 'single';
-  return (baseCard.config?.layout_type as string) || 'grid';
-}
-
-/** 获取图片排版 CSS 类 */
-function getImageLayoutClass(baseCard: { config?: Record<string, unknown> }): string {
-  return `card-window__image-preview--${getImageEffectiveLayout(baseCard)}`;
-}
-
-/** 获取单张图片容器样式 */
-function getImageSingleStyle(baseCard: { config?: Record<string, unknown> }): Record<string, string> {
-  const opts = (baseCard.config?.layout_options || {}) as Record<string, unknown>;
-  const alignment = (opts.single_alignment as string) || 'center';
-  const justifyMap: Record<string, string> = { left: 'flex-start', center: 'center', right: 'flex-end' };
-  return { display: 'flex', justifyContent: justifyMap[alignment] || 'center' };
-}
-
-/** 获取单张图片样式 */
-function getImageSingleImgStyle(baseCard: { config?: Record<string, unknown> }): Record<string, string> {
-  const opts = (baseCard.config?.layout_options || {}) as Record<string, unknown>;
-  const widthPct = (opts.single_width_percent as number) || 100;
-  return { width: `${widthPct}%`, maxWidth: '100%', height: 'auto', display: 'block', borderRadius: '4px' };
-}
-
-/** 获取网格排版样式 */
-function getImageGridStyle(baseCard: { config?: Record<string, unknown> }): Record<string, string> {
-  const opts = (baseCard.config?.layout_options || {}) as Record<string, unknown>;
-  const gridMode = (opts.grid_mode as string) || '2x2';
-  const gap = (opts.gap as number) ?? 8;
-  const cols = gridMode === '2x2' ? 2 : 3;
-  return { display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: `${gap}px` };
-}
-
-/** 获取网格显示项（含溢出标记） */
-function getImageGridDisplayItems(baseCard: { config?: Record<string, unknown> }): ImageItemPreview[] {
-  const images = getImageCardImages(baseCard);
-  const opts = (baseCard.config?.layout_options || {}) as Record<string, unknown>;
-  const gridMode = (opts.grid_mode as string) || '2x2';
-  if (gridMode === '3-column-infinite') return images;
-  const limit = gridMode === '3x3' ? 9 : 4;
-  if (images.length <= limit) return images;
-  const display = images.slice(0, limit);
-  const last = display[display.length - 1];
-  if (last) {
-    return [
-      ...display.slice(0, -1),
-      { ...last, _overflow: true, _overflowCount: images.length - limit + 1 },
-    ];
+  try {
+    return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+  } catch {
+    return { ...config };
   }
-  return display;
 }
 
-/** 获取长图拼接样式 */
-function getImageLongScrollStyle(baseCard: { config?: Record<string, unknown> }): Record<string, string> {
-  const opts = (baseCard.config?.layout_options || {}) as Record<string, unknown>;
-  const scrollMode = (opts.scroll_mode as string) || 'fixed-window';
-  if (scrollMode === 'fixed-window') {
-    const height = (opts.fixed_window_height as number) || 600;
-    return { maxHeight: `${height}px`, overflowY: 'auto', display: 'flex', flexDirection: 'column' };
-  }
-  return { display: 'flex', flexDirection: 'column' };
+function getCardPath(): string | null {
+  const path = cardInfo.value?.filePath;
+  return typeof path === 'string' && path.trim() ? path : null;
+}
+
+function buildCardResourcePath(resourcePath: string): string | null {
+  const cardPath = getCardPath();
+  if (!cardPath) return null;
+  return buildCardResourceFullPath(cardPath, resourcePath);
 }
 
 const resolvedImageMap = ref<Record<string, CardResolvedResource>>({});
 const pendingImageResolveKeys = new Set<string>();
-let resolveSession = 0;
-
-function getCardPath(): string {
-  return cardInfo.value?.filePath || `TestWorkspace/${props.config.cardId}.card`;
-}
-
-function buildCardResourcePath(resourcePath: string): string {
-  return buildCardResourceFullPath(getCardPath(), resourcePath);
-}
+let resourceResolveSession = 0;
 
 async function resolveImageAsync(fullPath: string): Promise<void> {
   if (pendingImageResolveKeys.has(fullPath) || resolvedImageMap.value[fullPath]) {
     return;
   }
+
   pendingImageResolveKeys.add(fullPath);
-  const currentSession = resolveSession;
+  const currentSession = resourceResolveSession;
 
   try {
     const resolved = await resolveCardResourceUrl(fullPath);
-    if (currentSession !== resolveSession) {
+    if (currentSession !== resourceResolveSession) {
       await releaseCardResourceUrl(resolved);
       return;
     }
+
     resolvedImageMap.value = { ...resolvedImageMap.value, [fullPath]: resolved };
   } catch {
-    // ignore; image will keep placeholder state
+    // ignore; image will fallback to empty source
   } finally {
     pendingImageResolveKeys.delete(fullPath);
   }
@@ -407,6 +341,7 @@ async function resolveImageAsync(fullPath: string): Promise<void> {
 async function releaseResolvedImage(fullPath: string): Promise<void> {
   const resolved = resolvedImageMap.value[fullPath];
   if (!resolved) return;
+
   await releaseCardResourceUrl(resolved);
 
   const nextMap = { ...resolvedImageMap.value };
@@ -414,16 +349,104 @@ async function releaseResolvedImage(fullPath: string): Promise<void> {
   resolvedImageMap.value = nextMap;
 }
 
+function releaseAllResolvedImages(): void {
+  resourceResolveSession += 1;
+
+  for (const fullPath of Object.keys(resolvedImageMap.value)) {
+    void releaseResolvedImage(fullPath);
+  }
+
+  pendingImageResolveKeys.clear();
+}
+
+function resolveImagePathForPreview(path: string): string {
+  if (isDirectResourceUrl(path)) {
+    return path;
+  }
+
+  const fullPath = buildCardResourcePath(path);
+  if (!fullPath) {
+    return '';
+  }
+
+  const cached = resolvedImageMap.value[fullPath];
+  if (cached) {
+    return cached.url;
+  }
+
+  void resolveImageAsync(fullPath);
+  return '';
+}
+
+function resolveImageCardConfig(config?: Record<string, unknown>): Record<string, unknown> {
+  const cloned = cloneConfig(config);
+
+  const imageFile = cloned.image_file;
+  if (typeof imageFile === 'string') {
+    cloned.image_file = resolveImagePathForPreview(imageFile);
+  }
+
+  const sourcePath = cloned.src;
+  if (typeof sourcePath === 'string' && !isDirectResourceUrl(sourcePath)) {
+    cloned.src = resolveImagePathForPreview(sourcePath);
+  }
+
+  const images = cloned.images;
+  if (Array.isArray(images)) {
+    cloned.images = images.map((item) => {
+      if (!isPlainObject(item)) return item;
+      const imageItem = { ...item } as ImageItemConfig;
+      if (typeof imageItem.file_path === 'string') {
+        imageItem.file_path = resolveImagePathForPreview(imageItem.file_path);
+      }
+      return imageItem;
+    });
+  }
+
+  return cloned;
+}
+
+function resolveRichTextCardConfig(config?: Record<string, unknown>): Record<string, unknown> {
+  const cloned = cloneConfig(config);
+  const contentText = cloned.content_text;
+
+  if (typeof contentText === 'string') {
+    cloned.content_text = sanitizeRichTextHtml(contentText);
+  }
+
+  return cloned;
+}
+
 function collectCurrentImageResourcePaths(): Set<string> {
   const paths = new Set<string>();
   const structure = cardInfo.value?.structure || [];
 
   for (const baseCard of structure) {
-    if (baseCard.type !== 'ImageCard') continue;
-    const images = getImageCardImages(baseCard);
-    for (const image of images) {
-      if (!image.file_path || isDirectResourceUrl(image.file_path)) continue;
-      paths.add(buildCardResourcePath(image.file_path));
+    if (resolveBaseCardRuntimeType(baseCard) !== 'ImageCard') continue;
+
+    const config = isPlainObject(baseCard.config) ? baseCard.config : {};
+
+    const imageFile = config.image_file;
+    if (typeof imageFile === 'string' && !isDirectResourceUrl(imageFile)) {
+      const fullPath = buildCardResourcePath(imageFile);
+      if (fullPath) {
+        paths.add(fullPath);
+      }
+    }
+
+    const images = config.images;
+    if (!Array.isArray(images)) {
+      continue;
+    }
+
+    for (const item of images) {
+      if (!isPlainObject(item)) continue;
+      const resourcePath = item.file_path;
+      if (typeof resourcePath !== 'string' || isDirectResourceUrl(resourcePath)) continue;
+      const fullPath = buildCardResourcePath(resourcePath);
+      if (fullPath) {
+        paths.add(fullPath);
+      }
     }
   }
 
@@ -441,52 +464,210 @@ function cleanupStaleImageResources(): void {
   }
 }
 
-function releaseAllResolvedImages(): void {
-  resolveSession += 1;
-  for (const fullPath of Object.keys(resolvedImageMap.value)) {
-    void releaseResolvedImage(fullPath);
-  }
-  pendingImageResolveKeys.clear();
+function buildParsedBaseCards(): ParsedBaseCardConfig[] {
+  const structure = cardInfo.value?.structure || [];
+
+  return structure.map((baseCard) => {
+    const runtimeType = resolveBaseCardRuntimeType(baseCard);
+    const baseConfig = isPlainObject(baseCard.config) ? baseCard.config : {};
+
+    return {
+      id: baseCard.id,
+      type: runtimeType,
+      config: runtimeType === 'ImageCard'
+        ? resolveImageCardConfig(baseConfig)
+        : runtimeType === 'RichTextCard'
+          ? resolveRichTextCardConfig(baseConfig)
+        : cloneConfig(baseConfig),
+    };
+  });
 }
 
-function getImagePreviewSrc(image?: ImageItemPreview): string {
-  if (!image) return '';
-  if (image.url) return image.url;
-  if (!image.file_path) return '';
+function buildParsedCardData(baseCards: ParsedBaseCardConfig[]): ParsedCardData {
+  const metadata = cardInfo.value?.metadata;
+  const now = new Date().toISOString();
 
-  if (isDirectResourceUrl(image.file_path)) {
-    return image.file_path;
-  }
-
-  const fullPath = buildCardResourcePath(image.file_path);
-  const cached = resolvedImageMap.value[fullPath];
-  if (cached) {
-    return cached.url;
-  }
-
-  void resolveImageAsync(fullPath);
-  return '';
+  return {
+    metadata: {
+      id: String(metadata?.card_id ?? props.config.cardId),
+      name: String(metadata?.name ?? t('card_window.untitled')),
+      version: String(metadata?.version ?? '1.0.0'),
+      description: typeof metadata?.description === 'string' ? metadata.description : undefined,
+      createdAt: String(metadata?.created_at ?? now),
+      modifiedAt: String(metadata?.modified_at ?? now),
+      themeId: typeof metadata?.theme === 'string' ? metadata.theme : undefined,
+      tags: Array.isArray(metadata?.tags)
+        ? metadata.tags.filter((tag): tag is string => typeof tag === 'string')
+        : undefined,
+      chipsStandardsVersion: String(metadata?.chip_standards_version ?? '1.0.0'),
+    },
+    structure: {
+      baseCardIds: baseCards.map((baseCard) => baseCard.id),
+    },
+    baseCards,
+  };
 }
 
-/** 图片加载失败处理 */
-function handleImagePreviewError(event: Event): void {
-  const img = event.target as HTMLImageElement;
-  img.style.opacity = '0.3';
-  img.style.filter = 'grayscale(100%)';
+function destroyPreviewMount(): void {
+  previewRenderVersion += 1;
+
+  if (previewDestroy) {
+    previewDestroy();
+    previewDestroy = null;
+  }
+
+  const container = previewContainer.value;
+  if (container) {
+    container.innerHTML = '';
+  }
+}
+
+function syncRenderedCardState(): void {
+  const container = previewContainer.value;
+  if (!container) return;
+
+  const baseCardElements = container.querySelectorAll<HTMLElement>('.chips-base-card-wrapper[data-card-id]');
+
+  baseCardElements.forEach((element, index) => {
+    const baseCardId = element.dataset.cardId;
+    if (!baseCardId) return;
+
+    element.dataset.baseCardId = baseCardId;
+    element.dataset.baseCardIndex = String(index);
+
+    element.classList.toggle(
+      'chips-editor-base-card--selected',
+      cardStore.selectedBaseCardId === baseCardId
+    );
+    element.classList.toggle('chips-editor-base-card--editing', isEditing.value);
+  });
+}
+
+async function renderCardPreview(): Promise<void> {
+  const container = previewContainer.value;
+  const currentCard = cardInfo.value;
+
+  if (!container || !currentCard || currentCard.isLoading || windowState.value === 'cover') {
+    destroyPreviewMount();
+    previewRenderError.value = null;
+    return;
+  }
+
+  if (!currentCard.structure?.length) {
+    destroyPreviewMount();
+    previewRenderError.value = null;
+    return;
+  }
+
+  const renderVersion = ++previewRenderVersion;
+
+  try {
+    const baseCards = buildParsedBaseCards();
+    const parsedCardData = buildParsedCardData(baseCards);
+    const cardTypes = baseCards.map((baseCard) => baseCard.type);
+    const renderers = await previewFetcher.fetchRenderers(cardTypes);
+
+    if (renderVersion !== previewRenderVersion) {
+      return;
+    }
+
+    destroyPreviewMount();
+
+    const renderManager = new CardRenderManager({
+      isolationMode: 'iframe',
+      cardGap: 12,
+      containerPadding: 0,
+    });
+
+    const mountResult = renderManager.render(parsedCardData, renderers, container);
+
+    if (!mountResult.success) {
+      previewRenderError.value = mountResult.error || t('plugin_host.error');
+      return;
+    }
+
+    previewRenderError.value = null;
+    previewDestroy = mountResult.destroy ?? null;
+    syncRenderedCardState();
+  } catch (error) {
+    if (renderVersion !== previewRenderVersion) {
+      return;
+    }
+
+    destroyPreviewMount();
+    previewRenderError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function schedulePreviewRender(): void {
+  const currentScheduleVersion = ++scheduledPreviewRenderVersion;
+
+  void nextTick(async () => {
+    if (currentScheduleVersion !== scheduledPreviewRenderVersion) {
+      return;
+    }
+
+    await renderCardPreview();
+  });
 }
 
 watch(
   () => cardInfo.value?.structure,
   () => {
     cleanupStaleImageResources();
+    schedulePreviewRender();
   },
-  { deep: true }
+  { deep: true, immediate: true }
+);
+
+watch(
+  () => cardInfo.value?.isLoading,
+  () => {
+    schedulePreviewRender();
+  },
+  { immediate: true }
 );
 
 watch(
   () => props.config.cardId,
   () => {
     releaseAllResolvedImages();
+    destroyPreviewMount();
+    schedulePreviewRender();
+  }
+);
+
+watch(
+  () => windowState.value,
+  (state) => {
+    if (state === 'cover') {
+      destroyPreviewMount();
+      return;
+    }
+
+    schedulePreviewRender();
+  }
+);
+
+watch(
+  () => resolvedImageMap.value,
+  () => {
+    schedulePreviewRender();
+  },
+  { deep: true }
+);
+
+watch(
+  () => cardStore.selectedBaseCardId,
+  () => {
+    syncRenderedCardState();
+  }
+);
+
+watch(
+  () => isEditing.value,
+  () => {
+    syncRenderedCardState();
   }
 );
 
@@ -503,11 +684,15 @@ watch(
 onUnmounted(() => {
   document.removeEventListener('mousemove', handleCoverMouseMove);
   document.removeEventListener('mouseup', handleCoverMouseUp);
+
   if (coverDragRafId !== null) {
     cancelAnimationFrame(coverDragRafId);
     coverDragRafId = null;
   }
+
+  destroyPreviewMount();
   releaseAllResolvedImages();
+  previewFetcher.clearCache();
 });
 </script>
 
@@ -574,122 +759,19 @@ onUnmounted(() => {
             <span class="card-window__loading-text">{{ t('card_window.loading') }}</span>
           </div>
           <div v-else class="card-window__body">
-            <!-- 基础卡片列表 -->
             <div
-              v-for="(baseCard, baseCardIndex) in cardInfo?.structure"
-              :key="baseCard.id"
-              class="card-window__base-card"
-              :data-base-card-id="baseCard.id"
-              :data-base-card-index="baseCardIndex"
-              :class="{
-                'card-window__base-card--selected': cardStore.selectedBaseCardId === baseCard.id,
-                'card-window__base-card--editing': isEditing,
-              }"
-              @click="selectBaseCard(baseCard.id)"
+              v-if="cardInfo?.structure?.length"
+              ref="previewContainer"
+              class="card-window__renderer-host"
+              @click="handlePreviewClick"
+            ></div>
+
+            <div
+              v-if="cardInfo?.structure?.length && previewRenderError"
+              class="card-window__render-error"
             >
-              <div class="card-window__base-card-content">
-                <!-- 富文本基础卡片预览 -->
-                <div 
-                  v-if="baseCard.type === 'RichTextCard'"
-                  class="card-window__base-card-preview"
-                >
-                  <div 
-                    class="card-window__richtext-preview"
-                    v-html="getRichTextPreview(baseCard)"
-                  ></div>
-                </div>
-                <!-- 图片基础卡片预览 -->
-                <div
-                  v-else-if="baseCard.type === 'ImageCard'"
-                  class="card-window__base-card-preview"
-                >
-                  <div
-                    v-if="getImageCardImages(baseCard).length > 0"
-                    class="card-window__image-preview"
-                    :class="getImageLayoutClass(baseCard)"
-                  >
-                    <template v-if="getImageEffectiveLayout(baseCard) === 'single'">
-                      <div
-                        class="card-window__image-single"
-                        :style="getImageSingleStyle(baseCard)"
-                      >
-                        <img
-                          :src="getImagePreviewSrc(getImageCardImages(baseCard)[0]) || undefined"
-                          :alt="getImageCardImages(baseCard)[0]?.alt || ''"
-                          class="card-window__image-single-img"
-                          :style="getImageSingleImgStyle(baseCard)"
-                          @error="handleImagePreviewError($event)"
-                        />
-                      </div>
-                    </template>
-                    <template v-else-if="getImageEffectiveLayout(baseCard) === 'grid'">
-                      <div
-                        class="card-window__image-grid"
-                        :style="getImageGridStyle(baseCard)"
-                      >
-                        <div
-                          v-for="(img, imgIdx) in getImageGridDisplayItems(baseCard)"
-                          :key="imgIdx"
-                          class="card-window__image-grid-cell"
-                        >
-                          <img
-                            v-if="!img._overflow"
-                            :src="getImagePreviewSrc(img) || undefined"
-                            :alt="img.alt || ''"
-                            class="card-window__image-grid-img"
-                            @error="handleImagePreviewError($event)"
-                          />
-                          <div v-else class="card-window__image-grid-overflow">
-                            <img
-                              :src="getImagePreviewSrc(img) || undefined"
-                              :alt="img.alt || ''"
-                              class="card-window__image-grid-img card-window__image-grid-img--dim"
-                              @error="handleImagePreviewError($event)"
-                            />
-                            <span class="card-window__image-grid-count">+{{ img._overflowCount }}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </template>
-                    <template v-else-if="getImageEffectiveLayout(baseCard) === 'long-scroll'">
-                      <div
-                        class="card-window__image-longscroll"
-                        :style="getImageLongScrollStyle(baseCard)"
-                      >
-                        <img
-                          v-for="(img, imgIdx) in getImageCardImages(baseCard)"
-                          :key="imgIdx"
-                          :src="getImagePreviewSrc(img) || undefined"
-                          :alt="img.alt || ''"
-                          class="card-window__image-longscroll-img"
-                          @error="handleImagePreviewError($event)"
-                        />
-                      </div>
-                    </template>
-                    <template v-else-if="getImageEffectiveLayout(baseCard) === 'horizontal-scroll'">
-                      <div class="card-window__image-horizontal">
-                        <img
-                          v-for="(img, imgIdx) in getImageCardImages(baseCard)"
-                          :key="imgIdx"
-                          :src="getImagePreviewSrc(img) || undefined"
-                          :alt="img.alt || ''"
-                          class="card-window__image-horizontal-img"
-                          @error="handleImagePreviewError($event)"
-                        />
-                      </div>
-                    </template>
-                  </div>
-                  <div v-else class="card-window__base-card-placeholder">
-                    <span class="card-window__base-card-type-icon">🖼️</span>
-                    <span>{{ getBaseCardTypeName(baseCard.type) }}</span>
-                  </div>
-                </div>
-                <!-- 其他类型卡片占位符 -->
-                <div v-else class="card-window__base-card-placeholder">
-                  <span class="card-window__base-card-type-icon">📄</span>
-                  <span>{{ getBaseCardTypeName(baseCard.type) }}</span>
-                </div>
-              </div>
+              <span class="card-window__render-error-icon">⚠️</span>
+              <span>{{ t('plugin_host.error') }}: {{ previewRenderError }}</span>
             </div>
 
             <!-- 空状态 -->
@@ -809,207 +891,50 @@ onUnmounted(() => {
   gap: var(--chips-spacing-md, 12px);
 }
 
-/* 基础卡片样式 */
-.card-window__base-card {
+.card-window__renderer-host {
+  width: 100%;
+  min-height: 40px;
+}
+
+.card-window__renderer-host :deep(.chips-base-card-wrapper) {
   border: 1px solid var(--chips-color-border, #e0e0e0);
   border-radius: var(--chips-radius-sm, 6px);
   overflow: hidden;
   transition: border-color var(--chips-transition-fast, 0.15s) ease,
-              box-shadow var(--chips-transition-fast, 0.15s) ease;
+    box-shadow var(--chips-transition-fast, 0.15s) ease;
 }
 
-.card-window__base-card--editing {
+.card-window__renderer-host :deep(.chips-base-card-wrapper.chips-editor-base-card--editing) {
   cursor: pointer;
 }
 
-.card-window__base-card--editing:hover {
+.card-window__renderer-host :deep(.chips-base-card-wrapper.chips-editor-base-card--editing:hover) {
   border-color: var(--chips-color-primary, #3b82f6);
 }
 
-.card-window__base-card--selected {
+.card-window__renderer-host :deep(.chips-base-card-wrapper.chips-editor-base-card--selected) {
   border-color: var(--chips-color-primary, #3b82f6);
   box-shadow: 0 0 0 2px var(--chips-color-primary-light, rgba(59, 130, 246, 0.2));
 }
 
-.card-window__base-card-header {
+.card-window__renderer-host :deep(.chips-base-card-wrapper.chips-editor-base-card--editing iframe) {
+  pointer-events: none;
+}
+
+.card-window__render-error {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: var(--chips-spacing-xs, 4px) var(--chips-spacing-sm, 8px);
-  background: var(--chips-color-surface-variant, #f5f5f5);
-  font-size: var(--chips-font-size-xs, 12px);
-}
-
-.card-window__base-card-type {
-  color: var(--chips-color-text-primary, #1a1a1a);
-  font-weight: var(--chips-font-weight-medium, 500);
-}
-
-.card-window__base-card-id {
-  color: var(--chips-color-text-tertiary, #999999);
-  font-family: monospace;
-}
-
-.card-window__base-card-content {
-  padding: var(--chips-spacing-xs, 4px) var(--chips-spacing-sm, 8px);
-}
-
-.card-window__base-card-preview {
-  min-height: 40px;
-}
-
-.card-window__richtext-preview {
+  gap: var(--chips-spacing-xs, 6px);
+  color: var(--chips-color-danger, #d32f2f);
   font-size: var(--chips-font-size-sm, 14px);
-  line-height: 1.6;
-  color: var(--chips-color-text-primary, #1a1a1a);
+  background: rgba(211, 47, 47, 0.08);
+  border: 1px solid rgba(211, 47, 47, 0.2);
+  border-radius: var(--chips-radius-sm, 6px);
+  padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 12px);
 }
 
-/* 使用 :deep() 让样式穿透到 v-html 渲染的内容 */
-.card-window__richtext-preview :deep(p) {
-  margin: 0.5em 0;
-}
-
-.card-window__richtext-preview :deep(p:first-child) {
-  margin-top: 0;
-}
-
-.card-window__richtext-preview :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-/* 文本格式样式 */
-.card-window__richtext-preview :deep(b),
-.card-window__richtext-preview :deep(strong) {
-  font-weight: bold;
-}
-
-.card-window__richtext-preview :deep(i),
-.card-window__richtext-preview :deep(em) {
-  font-style: italic;
-}
-
-.card-window__richtext-preview :deep(u) {
-  text-decoration: underline;
-}
-
-.card-window__richtext-preview :deep(s),
-.card-window__richtext-preview :deep(strike),
-.card-window__richtext-preview :deep(del) {
-  text-decoration: line-through;
-}
-
-.card-window__richtext-preview :deep(sub) {
-  vertical-align: sub;
-  font-size: smaller;
-}
-
-.card-window__richtext-preview :deep(sup) {
-  vertical-align: super;
-  font-size: smaller;
-}
-
-.card-window__richtext-preview :deep(code) {
-  font-family: monospace;
-  background: rgba(0, 0, 0, 0.05);
-  padding: 0.1em 0.3em;
-  border-radius: 3px;
-}
-
-/* 列表样式 */
-.card-window__richtext-preview :deep(ul),
-.card-window__richtext-preview :deep(ol) {
-  margin: 0.5em 0;
-  padding-left: 1.5em;
-}
-
-.card-window__richtext-preview :deep(ol) {
-  list-style-type: decimal;
-}
-
-.card-window__richtext-preview :deep(ul) {
-  list-style-type: disc;
-}
-
-.card-window__richtext-preview :deep(li) {
-  margin: 0.25em 0;
-}
-
-/* 标题样式 */
-.card-window__richtext-preview :deep(h1),
-.card-window__richtext-preview :deep(h2),
-.card-window__richtext-preview :deep(h3),
-.card-window__richtext-preview :deep(h4),
-.card-window__richtext-preview :deep(h5),
-.card-window__richtext-preview :deep(h6) {
-  margin: 0.5em 0;
-  font-weight: bold;
-}
-
-.card-window__richtext-preview :deep(h1) { font-size: 1.5em; }
-.card-window__richtext-preview :deep(h2) { font-size: 1.3em; }
-.card-window__richtext-preview :deep(h3) { font-size: 1.1em; }
-.card-window__richtext-preview :deep(h4) { font-size: 1em; }
-.card-window__richtext-preview :deep(h5) { font-size: 0.9em; }
-.card-window__richtext-preview :deep(h6) { font-size: 0.8em; }
-
-/* 引用样式 */
-.card-window__richtext-preview :deep(blockquote) {
-  margin: 0.5em 0;
-  padding: 0.5em 1em;
-  border-left: 3px solid var(--chips-color-border, #ddd);
-  background: var(--chips-color-surface-variant, #f5f5f5);
-}
-
-/* 链接样式 */
-.card-window__richtext-preview :deep(a) {
-  color: var(--chips-color-primary, #3b82f6);
-  text-decoration: underline;
-}
-
-/* 图片样式 */
-.card-window__richtext-preview :deep(img) {
-  max-width: 100%;
-  height: auto;
-}
-
-/* 分割线样式 */
-.card-window__richtext-preview :deep(hr) {
-  border: none;
-  border-top: 1px solid var(--chips-color-border, #ddd);
-  margin: 0.5em 0;
-}
-
-/* 对齐样式 */
-.card-window__richtext-preview :deep([style*="text-align: center"]),
-.card-window__richtext-preview :deep([align="center"]) {
-  text-align: center;
-}
-
-.card-window__richtext-preview :deep([style*="text-align: right"]),
-.card-window__richtext-preview :deep([align="right"]) {
-  text-align: right;
-}
-
-.card-window__richtext-preview :deep([style*="text-align: justify"]) {
-  text-align: justify;
-}
-
-.card-window__base-card-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--chips-spacing-xs, 4px);
-  padding: var(--chips-spacing-md, 16px);
-  text-align: center;
-  color: var(--chips-color-text-secondary, #666666);
-  background: var(--chips-color-surface-variant, #f5f5f5);
-  border-radius: var(--chips-radius-sm, 4px);
-}
-
-.card-window__base-card-type-icon {
-  font-size: 24px;
-  opacity: 0.6;
+.card-window__render-error-icon {
+  font-size: 16px;
 }
 
 /* 空状态样式 */
@@ -1036,94 +961,5 @@ onUnmounted(() => {
 .card-window__empty-hint {
   font-size: var(--chips-font-size-sm, 14px);
   color: var(--chips-color-text-tertiary, #999999);
-}
-
-/* ============================================================
- * 图片卡片预览样式
- * ============================================================ */
-.card-window__image-preview {
-  width: 100%;
-}
-
-/* 单张图片 */
-.card-window__image-single {
-  width: 100%;
-}
-.card-window__image-single-img {
-  object-fit: contain;
-  border-radius: var(--chips-radius-sm, 4px);
-}
-
-/* 网格排版 */
-.card-window__image-grid {
-  width: 100%;
-}
-.card-window__image-grid-cell {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--chips-radius-sm, 4px);
-  aspect-ratio: 1;
-  background: var(--chips-color-surface-variant, #f5f5f5);
-}
-.card-window__image-grid-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.card-window__image-grid-img--dim {
-  filter: brightness(0.4);
-}
-.card-window__image-grid-overflow {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-.card-window__image-grid-count {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #ffffff;
-  font-size: 20px;
-  font-weight: 600;
-  pointer-events: none;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-}
-
-/* 长图拼接 */
-.card-window__image-longscroll {
-  width: 100%;
-  border-radius: var(--chips-radius-sm, 4px);
-}
-.card-window__image-longscroll::-webkit-scrollbar { width: 4px; }
-.card-window__image-longscroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15); border-radius: 2px;
-}
-.card-window__image-longscroll-img {
-  width: 100%;
-  display: block;
-}
-
-/* 横向滑动 */
-.card-window__image-horizontal {
-  width: 100%;
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  border-radius: var(--chips-radius-sm, 4px);
-}
-.card-window__image-horizontal::-webkit-scrollbar { height: 4px; }
-.card-window__image-horizontal::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15); border-radius: 2px;
-}
-.card-window__image-horizontal-img {
-  height: 200px;
-  width: auto;
-  flex-shrink: 0;
-  border-radius: var(--chips-radius-sm, 4px);
-  object-fit: cover;
 }
 </style>

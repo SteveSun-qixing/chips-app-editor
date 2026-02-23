@@ -17,6 +17,10 @@ interface PluginManifest {
   type?: string;
   cardType?: string;
   layoutType?: string;
+  capabilities?: {
+    cardType?: string;
+    layoutType?: string;
+  };
 }
 
 function resolveIcon(manifest: PluginManifest): string {
@@ -38,6 +42,22 @@ function parsePluginManifest(raw: unknown, path: string): PluginManifest | null 
   } catch {
     return null;
   }
+}
+
+function isManifestExcluded(path: string, manifest: PluginManifest): boolean {
+  const normalizedPath = path.toLowerCase();
+  const pluginId = (manifest.id ?? '').toLowerCase();
+  const pluginName = (manifest.name ?? '').toLowerCase();
+
+  if (normalizedPath.includes('归档')) return true;
+  if (normalizedPath.includes('chips-template-card')) return true;
+  if (normalizedPath.includes('basic-card-plugin-template')) return true;
+
+  if (pluginId.includes('template') || pluginId.includes('sample-card')) return true;
+  if (pluginName.includes('template') || pluginName.includes('sample card')) return true;
+  if (pluginName.includes('i18n.plugin.template_card')) return true;
+
+  return false;
 }
 
 const manifestModules = import.meta.glob('../../../../BasicCardPlugin/**/manifest.yaml', {
@@ -70,11 +90,13 @@ const layoutManifestModules = {
 };
 
 export const cardTypes: CardTypeDefinition[] = Object.entries(manifestModules)
-  .map(([path, raw]) => parsePluginManifest(raw, path))
-  .filter((manifest): manifest is PluginManifest => Boolean(manifest))
-  .filter((manifest) => manifest.type === 'base_card')
+  .map(([path, raw]) => ({ path, manifest: parsePluginManifest(raw, path) }))
+  .filter((entry): entry is { path: string; manifest: PluginManifest } => Boolean(entry.manifest))
+  .filter((entry) => !isManifestExcluded(entry.path, entry.manifest))
+  .map((entry) => entry.manifest)
+  .filter((manifest) => manifest.type === 'card')
   .map((manifest) => {
-    const id = manifest.cardType ?? manifest.id ?? 'unknown';
+    const id = manifest.capabilities?.cardType ?? manifest.cardType ?? manifest.id ?? 'unknown';
     const name = manifest.name ?? id;
     const description = manifest.description ?? '';
     const keywords = [name, description, id, ...(manifest.tags ?? [])]
@@ -93,11 +115,13 @@ export const cardTypes: CardTypeDefinition[] = Object.entries(manifestModules)
 
 /** 已安装的箱子布局类型（由布局插件清单动态生成，与基础卡片一致） */
 export const layoutTypes: LayoutTypeDefinition[] = Object.entries(layoutManifestModules)
-  .map(([path, raw]) => parsePluginManifest(raw, path))
-  .filter((manifest): manifest is PluginManifest => Boolean(manifest))
+  .map(([path, raw]) => ({ path, manifest: parsePluginManifest(raw, path) }))
+  .filter((entry): entry is { path: string; manifest: PluginManifest } => Boolean(entry.manifest))
+  .filter((entry) => !isManifestExcluded(entry.path, entry.manifest))
+  .map((entry) => entry.manifest)
   .filter((manifest) => manifest.type === 'layout')
   .map((manifest) => {
-    const id = manifest.layoutType ?? manifest.id ?? 'unknown';
+    const id = manifest.capabilities?.layoutType ?? manifest.layoutType ?? manifest.id ?? 'unknown';
     const name = manifest.name ?? id;
     const description = manifest.description ?? '';
     const keywords = [name, description, id, ...(manifest.tags ?? [])]

@@ -81,6 +81,7 @@ export function createMockBridge(): ChipsBridgeAPI {
       get: vi.fn().mockResolvedValue(null),
       getCardPlugin: vi.fn().mockResolvedValue(null),
       getLayoutPlugin: vi.fn().mockResolvedValue(null),
+      resolveFileUrl: vi.fn().mockResolvedValue(''),
     },
     clipboard: {
       readText: vi.fn().mockResolvedValue(''),

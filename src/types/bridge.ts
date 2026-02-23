@@ -49,6 +49,12 @@ export interface ChipsPluginInfo {
   publisher: string;
   installPath: string;
   enabled: boolean;
+  description?: string;
+  capabilities?: {
+    cardType?: string;
+    layoutType?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface ChipsPluginSelfInfo {
@@ -100,6 +106,7 @@ export interface ChipsPluginBridge {
   getLayoutPlugin(
     layoutType: string
   ): Promise<{ pluginId: string; rendererPath: string; editorPath: string } | null>;
+  resolveFileUrl(pluginId: string, relativePath: string): Promise<string>;
 }
 
 export interface ChipsClipboardBridge {

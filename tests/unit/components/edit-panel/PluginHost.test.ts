@@ -778,6 +778,28 @@ describe('PluginHost', () => {
     });
   });
 
+  describe('运行时类型对齐', () => {
+    it('应优先使用 config.card_type 加载 iframe 编辑器', async () => {
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+
+      wrapper = mountComponent({
+        cardType: 'chips-official.rich-text-card',
+        config: {
+          card_type: 'RichTextCard',
+        },
+      });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      expect(getEditorRuntimeMock).toHaveBeenCalledWith('RichTextCard');
+    });
+  });
+
   // ==================== Expose 测试 ====================
 
   describe('暴露的方法', () => {

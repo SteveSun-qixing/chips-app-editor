@@ -220,6 +220,47 @@ describe('EditPanel', () => {
 
       expect(wrapper.find('.edit-panel__subtitle').text()).toBe('base-002');
     });
+
+    it('应向 PluginHost 传递运行时卡片类型', async () => {
+      const mockCard = {
+        id: 'card-runtime',
+        metadata: {
+          chip_standards_version: '1.0.0',
+          card_id: 'card-runtime',
+          name: 'Runtime Card',
+          created_at: '2026-01-01T00:00:00Z',
+          modified_at: '2026-01-01T00:00:00Z',
+        },
+        structure: {
+          structure: [
+            {
+              id: 'base-runtime',
+              type: 'chips-official.rich-text-card',
+              config: {
+                card_type: 'RichTextCard',
+                content_text: 'hello',
+              },
+            },
+          ],
+          manifest: {
+            card_count: 1,
+            resource_count: 0,
+            resources: [],
+          },
+        },
+      };
+
+      cardStore.addCard(mockCard);
+      cardStore.setActiveCard('card-runtime');
+      cardStore.setSelectedBaseCard('base-runtime');
+
+      wrapper = mountComponent();
+      await nextTick();
+
+      const pluginHost = wrapper.findComponent({ name: 'PluginHost' });
+      expect(pluginHost.exists()).toBe(true);
+      expect(pluginHost.props('cardType')).toBe('RichTextCard');
+    });
   });
 
   // ==================== Props 测试 ====================

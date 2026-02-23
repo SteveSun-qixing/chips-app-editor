@@ -137,12 +137,17 @@ function getLocalPluginMap(): Map<string, LocalPluginEntry> {
   return localPluginMap;
 }
 
+function getLocalPluginEntry(cardType: string): LocalPluginEntry | null {
+  const map = getLocalPluginMap();
+  const normalizedCardType = pluginIdToCardType.get(cardType) ?? cardType;
+  return map.get(cardType) ?? map.get(normalizedCardType) ?? null;
+}
+
 /**
  * 本地回退：通过构建时扫描的清单获取编辑器入口 URL
  */
 function getLocalEditorUrl(cardType: string): string | null {
-  const map = getLocalPluginMap();
-  const entry = map.get(cardType);
+  const entry = getLocalPluginEntry(cardType);
   if (!entry) return null;
 
   // 将 manifestDir + editorPath 拼接为相对于当前模块的路径，
@@ -179,6 +184,12 @@ function resolvePluginCardType(plugin: {
 }
 
 function normalizeCardType(cardType: string): string {
+  const resolved = pluginIdToCardType.get(cardType);
+  if (resolved) {
+    return resolved;
+  }
+
+  getLocalPluginMap();
   return pluginIdToCardType.get(cardType) ?? cardType;
 }
 
@@ -646,25 +657,42 @@ export async function getEditorRuntime(cardType: string): Promise<EditorRuntime 
     pluginInfo = await getCardPluginInfo(normalizedCardType, { force: true });
   }
 
+  const localEditorUrl = getLocalEditorUrl(normalizedCardType) ?? getLocalEditorUrl(cardType);
+  const localPluginId =
+    getLocalPluginEntry(normalizedCardType)?.pluginId
+    ?? getLocalPluginEntry(cardType)?.pluginId;
+
   if (!pluginInfo || !pluginInfo.editorPath) {
+    if (localEditorUrl) {
+      const runtime: EditorRuntime = {
+        mode: 'iframe',
+        pluginId: localPluginId ?? normalizedCardType,
+        iframeUrl: localEditorUrl,
+      };
+      runtimeCache.set(normalizedCardType, runtime);
+      runtimeCache.set(cardType, runtime);
+      return runtime;
+    }
+
     console.warn(`[PluginService] Card plugin info not found for cardType "${normalizedCardType}"`);
     return null;
   }
 
-  const editorPath = pluginInfo.editorUrl
+  const resolvedEditorPath = pluginInfo.editorUrl
     ?? await resolvePluginEntryPath(pluginInfo.pluginId, pluginInfo.editorPath);
-  if (!editorPath) {
+  const runtimeEntryPath = resolvedEditorPath ?? localEditorUrl;
+  if (!runtimeEntryPath) {
     console.warn(
       `[PluginService] Failed to resolve editor path for "${normalizedCardType}" from "${pluginInfo.editorPath}"`
     );
     return null;
   }
 
-  if (isHtmlEntryPath(editorPath)) {
+  if (isHtmlEntryPath(runtimeEntryPath)) {
     const runtime: EditorRuntime = {
       mode: 'iframe',
       pluginId: pluginInfo.pluginId,
-      iframeUrl: editorPath,
+      iframeUrl: runtimeEntryPath,
     };
     runtimeCache.set(normalizedCardType, runtime);
     runtimeCache.set(cardType, runtime);
@@ -672,7 +700,7 @@ export async function getEditorRuntime(cardType: string): Promise<EditorRuntime 
   }
 
   try {
-    const module = await import(/* @vite-ignore */ editorPath);
+    const module = await import(/* @vite-ignore */ runtimeEntryPath);
     const component = (module as { default: Component }).default;
     componentCache.set(normalizedCardType, component);
     componentCache.set(cardType, component);

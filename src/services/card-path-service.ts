@@ -6,22 +6,32 @@ function normalizePath(value?: string | null): string {
   return value.trim().replace(/\\/g, '/');
 }
 
-function toRootRelative(path: string): string {
-  const normalizedPath = normalizePath(path);
-  if (!normalizedPath) {
-    return '';
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
+}
+
+function joinPath(base: string, relative: string): string {
+  const cleanBase = base.replace(/\/+$/, '');
+  const cleanRelative = relative.replace(/^\/+/, '');
+  return cleanRelative ? `${cleanBase}/${cleanRelative}` : cleanBase;
+}
+
+function stripCardSuffix(cardId: string): string {
+  return cardId.replace(/\.card$/i, '');
+}
+
+function resolvePathWithWorkspace(path: string, workspaceRoot: string): string {
+  if (!path || !workspaceRoot || isAbsolutePath(path)) {
+    return path;
   }
 
-  const rootPrefix = normalizedPath.split('/').slice(0, -1).join('/');
-  if (rootPrefix && normalizedPath.startsWith(`${rootPrefix}/`)) {
-    return normalizedPath.slice(rootPrefix.length + 1);
+  const workspaceName = workspaceRoot.split('/').filter(Boolean).pop() ?? '';
+  if (workspaceName && (path === workspaceName || path.startsWith(`${workspaceName}/`))) {
+    const remainder = path.slice(workspaceName.length).replace(/^\/+/, '');
+    return joinPath(workspaceRoot, remainder);
   }
 
-  if (normalizedPath.startsWith('/')) {
-    return normalizedPath.slice(1);
-  }
-
-  return normalizedPath;
+  return joinPath(workspaceRoot, path);
 }
 
 export function resolveCardPath(
@@ -30,8 +40,9 @@ export function resolveCardPath(
   workspaceRoot?: string | null,
 ): string {
   const directPath = normalizePath(filePath);
+  const normalizedWorkspaceRoot = normalizePath(workspaceRoot);
   if (directPath) {
-    return directPath;
+    return resolvePathWithWorkspace(directPath, normalizedWorkspaceRoot);
   }
 
   const normalizedCardId = normalizePath(cardId);
@@ -39,15 +50,11 @@ export function resolveCardPath(
     return '';
   }
 
-  const normalizedWorkspaceRoot = normalizePath(workspaceRoot);
   if (normalizedWorkspaceRoot) {
-    const workspaceRootRelative = toRootRelative(normalizedWorkspaceRoot);
-    if (workspaceRootRelative) {
-      return `${workspaceRootRelative}/${normalizedCardId}.card`;
-    }
+    return joinPath(normalizedWorkspaceRoot, stripCardSuffix(normalizedCardId));
   }
 
-  return `${normalizedCardId}.card`;
+  return stripCardSuffix(normalizedCardId);
 }
 
 export function requireCardPath(

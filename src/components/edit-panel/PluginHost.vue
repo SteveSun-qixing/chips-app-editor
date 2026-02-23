@@ -16,7 +16,7 @@ import DefaultEditor from './DefaultEditor.vue';
 import type { EditorPlugin } from './types';
 import { getEditorRuntime, getLocalPluginVocabulary, getCardPluginPermissions } from '@/services/plugin-service';
 import { t } from '@/services/i18n-service';
-import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
+import { resolveCardPath } from '@/services/card-path-service';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
 import {
   buildCardResourceFullPath,
@@ -1216,8 +1216,7 @@ async function persistCardConfig(): Promise<void> {
     return;
   }
 
-  const cardPath = requireCardPath(activeCard.id, activeCard.filePath, 'PluginHost.persistCardConfig');
-  await saveCardToWorkspace(activeCard, cardPath);
+  const cardPath = await saveCardToWorkspace(activeCard, activeCard.filePath);
   if (!activeCard.filePath) {
     cardStore.updateFilePath(activeCard.id, cardPath);
   }
@@ -1351,6 +1350,10 @@ onUnmounted(async () => {
   // 清理防抖定时器
   if (debounceTimer) {
     clearTimeout(debounceTimer);
+  }
+
+  if (hasUnsavedChanges.value) {
+    await saveConfig();
   }
   
   // 停止自动保存

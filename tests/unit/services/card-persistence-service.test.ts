@@ -13,7 +13,12 @@ vi.mock('@/services/resource-service', () => ({
   },
 }));
 
-import { saveCardToWorkspace } from '@/services/card-persistence-service';
+import {
+  createCardSnapshotWithInsertedBaseCard,
+  persistInsertedBaseCard,
+  saveCardToWorkspace,
+} from '@/services/card-persistence-service';
+import type { BaseCardInfo, CardInfo } from '@/core/state/stores/card';
 
 describe('card-persistence-service', () => {
   beforeEach(() => {
@@ -130,5 +135,98 @@ describe('card-persistence-service', () => {
 
     await expect(saveCardToWorkspace(card as any)).rejects.toThrow('save failed');
     expect(ensureDirMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('creates insertion snapshot without mutating original structure', () => {
+    const originalStructure: BaseCardInfo[] = [
+      {
+        id: 'base-001',
+        type: 'RichTextCard',
+        config: { content_source: 'inline' },
+      },
+      {
+        id: 'base-003',
+        type: 'ImageCard',
+        config: { images: [] },
+      },
+    ];
+
+    const card: CardInfo = {
+      id: 'card-010',
+      metadata: {
+        card_id: 'card-010',
+        name: 'Snapshot Card',
+        created_at: '2026-01-01T00:00:00.000Z',
+        modified_at: '2026-01-01T00:00:00.000Z',
+      },
+      structure: originalStructure,
+      isLoading: false,
+      isModified: false,
+      lastModified: 1,
+    };
+
+    const insertedBaseCard: BaseCardInfo = {
+      id: 'base-002',
+      type: 'MarkdownCard',
+      config: { content_source: 'inline', content_text: '' },
+    };
+
+    const snapshot = createCardSnapshotWithInsertedBaseCard(
+      card,
+      insertedBaseCard,
+      1
+    );
+
+    expect(snapshot.structure.map((item) => item.id)).toEqual(['base-001', 'base-002', 'base-003']);
+    expect(card.structure.map((item) => item.id)).toEqual(['base-001', 'base-003']);
+    expect(snapshot.isModified).toBe(true);
+    expect(snapshot.lastModified).toBeGreaterThan(1);
+  });
+
+  it('persists inserted base card using clamped insert index', async () => {
+    const card: CardInfo = {
+      id: 'card-011',
+      metadata: {
+        card_id: 'card-011',
+        name: 'Persist Insert Card',
+        created_at: '2026-01-01T00:00:00.000Z',
+        modified_at: '2026-01-01T00:00:00.000Z',
+      },
+      structure: [
+        {
+          id: 'base-001',
+          type: 'RichTextCard',
+          config: { content_source: 'inline', content_text: '' },
+        },
+      ],
+      isLoading: false,
+      isModified: false,
+      lastModified: Date.now(),
+      filePath: 'TestWorkspace/card-011',
+    };
+
+    const insertedBaseCard: BaseCardInfo = {
+      id: 'base-999',
+      type: 'ImageCard',
+      config: { image_file: 'demo.png' },
+    };
+
+    const result = await persistInsertedBaseCard(
+      card,
+      insertedBaseCard,
+      999,
+      'TestWorkspace/card-011'
+    );
+
+    expect(result.persistedPath).toBe('/ProductFinishedProductTestingSpace/TestWorkspace/card-011');
+    expect(result.nextStructure.map((item) => item.id)).toEqual(['base-001', 'base-999']);
+    expect(writeTextMock).toHaveBeenCalledWith(
+      '/ProductFinishedProductTestingSpace/TestWorkspace/card-011/.card/structure.yaml',
+      expect.stringContaining('card_count: 2')
+    );
+    expect(writeTextMock).toHaveBeenCalledWith(
+      '/ProductFinishedProductTestingSpace/TestWorkspace/card-011/content/base-999.yaml',
+      expect.stringContaining('type: ImageCard')
+    );
   });
 });

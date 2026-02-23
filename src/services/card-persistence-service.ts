@@ -1,5 +1,5 @@
 import yaml from 'yaml';
-import type { CardInfo } from '@/core/state/stores/card';
+import type { BaseCardInfo, CardInfo } from '@/core/state/stores/card';
 import { stringifyBaseCardContentYaml } from '@/core/base-card-content-loader';
 import { resolveCardPath } from './card-path-service';
 import { resourceService } from './resource-service';
@@ -65,4 +65,43 @@ export async function saveCardToWorkspace(card: CardInfo, cardPath?: string): Pr
   }
 
   return path;
+}
+
+function clampInsertPosition(position: number, length: number): number {
+  if (!Number.isFinite(position)) {
+    return length;
+  }
+
+  return Math.max(0, Math.min(length, position));
+}
+
+export function createCardSnapshotWithInsertedBaseCard(
+  card: CardInfo,
+  baseCard: BaseCardInfo,
+  position: number,
+): CardInfo {
+  const nextStructure = [...card.structure];
+  const insertPosition = clampInsertPosition(position, nextStructure.length);
+  nextStructure.splice(insertPosition, 0, baseCard);
+
+  return {
+    ...card,
+    structure: nextStructure,
+    isModified: true,
+    lastModified: Date.now(),
+  };
+}
+
+export async function persistInsertedBaseCard(
+  card: CardInfo,
+  baseCard: BaseCardInfo,
+  position: number,
+  cardPath?: string,
+): Promise<{ persistedPath: string; nextStructure: BaseCardInfo[] }> {
+  const snapshot = createCardSnapshotWithInsertedBaseCard(card, baseCard, position);
+  const persistedPath = await saveCardToWorkspace(snapshot, cardPath);
+  return {
+    persistedPath,
+    nextStructure: snapshot.structure,
+  };
 }

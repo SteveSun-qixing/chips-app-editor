@@ -21,6 +21,8 @@ import { initializeEditorI18n, t, setLocale } from '@/services/i18n-service';
 import { initializeSettingsService } from '@/services/settings-service';
 import { resourceService, setWorkspacePaths } from '@/services/resource-service';
 import { loadBaseCardConfigsFromContent } from '@/core/base-card-content-loader';
+import { requireCardPath } from '@/services/card-path-service';
+import { persistInsertedBaseCard } from '@/services/card-persistence-service';
 import {
   subscribePluginInit,
   extractLaunchFilePath,
@@ -173,27 +175,55 @@ function focusCardWindow(cardId: string): void {
   }
 }
 
-function insertLibraryBaseCard(
+async function insertLibraryBaseCard(
   data: CardLibraryDragData,
   target: CardWindowDropTarget
-): boolean {
+): Promise<boolean> {
   const targetCard = cardStore.openCards.get(target.cardId);
   if (!targetCard) return false;
 
   const baseCardId = generateId62();
   const insertIndex = normalizeInsertIndex(target.insertIndex, targetCard.structure.length);
-  cardStore.addBaseCard(
-    target.cardId,
-    {
-      id: baseCardId,
-      type: data.typeId,
-      config: {
-        content_source: 'inline',
-        content_text: '',
-      },
+  const baseCard = {
+    id: baseCardId,
+    type: data.typeId,
+    config: {
+      content_source: 'inline',
+      content_text: '',
     },
-    insertIndex
-  );
+  };
+
+  try {
+    const cardPath = requireCardPath(
+      targetCard.id,
+      targetCard.filePath,
+      'App.insertLibraryBaseCard',
+      resourceService.workspaceRoot
+    );
+
+    const { persistedPath } = await persistInsertedBaseCard(
+      targetCard,
+      baseCard,
+      insertIndex,
+      cardPath
+    );
+
+    cardStore.addBaseCard(target.cardId, baseCard, insertIndex);
+    cardStore.updateFilePath(targetCard.id, persistedPath);
+    cardStore.markCardSaved(targetCard.id);
+    if (!cardStore.hasModifiedCards) {
+      editorStore.markSaved();
+    }
+  } catch (error) {
+    console.error('[App] Failed to insert and persist base card', {
+      cardId: target.cardId,
+      baseCardType: data.typeId,
+      insertIndex,
+      error,
+    });
+    return false;
+  }
+
   cardStore.setActiveCard(target.cardId);
   cardStore.setSelectedBaseCard(baseCardId);
   focusCardWindow(target.cardId);
@@ -367,7 +397,8 @@ async function handleDropCreate(
   console.warn('[App] 拖放创建:', data, '位置:', worldPosition, '目标:', target);
 
   if (data.type === 'card') {
-    if (target && insertLibraryBaseCard(data, target)) {
+    if (target) {
+      await insertLibraryBaseCard(data, target);
       return;
     }
     await createCompositeCard(data, worldPosition);

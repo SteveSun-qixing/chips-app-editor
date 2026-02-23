@@ -3,15 +3,22 @@ function normalizePath(value?: string | null): string {
     return '';
   }
 
-  return value.trim().replace(/\\/g, '/');
+  return value.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
 }
 
 function isAbsolutePath(path: string): boolean {
   return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
 }
 
+function trimTrailingSlash(path: string): string {
+  if (path === '/') {
+    return path;
+  }
+  return path.replace(/\/+$/, '');
+}
+
 function joinPath(base: string, relative: string): string {
-  const cleanBase = base.replace(/\/+$/, '');
+  const cleanBase = trimTrailingSlash(base);
   const cleanRelative = relative.replace(/^\/+/, '');
   return cleanRelative ? `${cleanBase}/${cleanRelative}` : cleanBase;
 }
@@ -21,17 +28,35 @@ function stripCardSuffix(cardId: string): string {
 }
 
 function resolvePathWithWorkspace(path: string, workspaceRoot: string): string {
-  if (!path || !workspaceRoot || isAbsolutePath(path)) {
-    return path;
+  const normalizedPath = normalizePath(path);
+  if (!normalizedPath) {
+    return '';
   }
 
-  const workspaceName = workspaceRoot.split('/').filter(Boolean).pop() ?? '';
-  if (workspaceName && (path === workspaceName || path.startsWith(`${workspaceName}/`))) {
-    const remainder = path.slice(workspaceName.length).replace(/^\/+/, '');
-    return joinPath(workspaceRoot, remainder);
+  if (isAbsolutePath(normalizedPath)) {
+    return normalizedPath;
   }
 
-  return joinPath(workspaceRoot, path);
+  const normalizedWorkspaceRoot = trimTrailingSlash(normalizePath(workspaceRoot));
+  if (!normalizedWorkspaceRoot || !isAbsolutePath(normalizedWorkspaceRoot)) {
+    return '';
+  }
+
+  const workspaceName = normalizedWorkspaceRoot.split('/').filter(Boolean).pop() ?? '';
+  if (workspaceName && (normalizedPath === workspaceName || normalizedPath.startsWith(`${workspaceName}/`))) {
+    const remainder = normalizedPath.slice(workspaceName.length).replace(/^\/+/, '');
+    return joinPath(normalizedWorkspaceRoot, remainder);
+  }
+
+  return joinPath(normalizedWorkspaceRoot, normalizedPath);
+}
+
+function resolveCardIdPath(cardId: string, workspaceRoot: string): string {
+  const normalizedCardId = stripCardSuffix(normalizePath(cardId));
+  if (!normalizedCardId) {
+    return '';
+  }
+  return resolvePathWithWorkspace(normalizedCardId, workspaceRoot);
 }
 
 export function resolveCardPath(
@@ -50,11 +75,7 @@ export function resolveCardPath(
     return '';
   }
 
-  if (normalizedWorkspaceRoot) {
-    return joinPath(normalizedWorkspaceRoot, stripCardSuffix(normalizedCardId));
-  }
-
-  return stripCardSuffix(normalizedCardId);
+  return resolveCardIdPath(normalizedCardId, normalizedWorkspaceRoot);
 }
 
 export function requireCardPath(

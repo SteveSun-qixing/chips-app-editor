@@ -10,6 +10,7 @@ import JSZip from 'jszip';
 import { resourceServiceMock, resetResourceServiceMock } from './helpers/resource-service-mock';
 import { installMockBridge, resetMockBridge } from './helpers/mock-bridge';
 import { initializeEditorI18n } from '@/services/i18n-service';
+import { setWorkspacePaths } from '@/services/resource-service';
 
 type ProgressCallback = (progress: { percent: number }) => void;
 
@@ -666,6 +667,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetResourceServiceMock();
   resetMockBridge();
+  setWorkspacePaths(
+    '/ProductFinishedProductTestingSpace/TestWorkspace',
+    '/ProductFinishedProductTestingSpace/ExternalEnvironment'
+  );
 });
 
 afterEach(() => {

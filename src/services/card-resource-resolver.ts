@@ -17,8 +17,12 @@ export interface CardResolvedResource {
   source: CardResolvedResourceSource;
 }
 
-function normalizePathSegment(path: string): string {
-  return path.replace(/^\/+/, '').replace(/\/+/g, '/');
+function normalizeCardPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/+$/, '');
+}
+
+function normalizeResourcePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
 }
 
 export function isDirectResourceUrl(path: string): boolean {
@@ -31,8 +35,17 @@ export function isDirectResourceUrl(path: string): boolean {
 }
 
 export function buildCardResourceFullPath(cardPath: string, resourcePath: string): string {
-  const normalizedCardPath = normalizePathSegment(cardPath);
-  const normalizedResourcePath = normalizePathSegment(resourcePath);
+  const normalizedCardPath = normalizeCardPath(cardPath);
+  const normalizedResourcePath = normalizeResourcePath(resourcePath);
+
+  if (!normalizedCardPath) {
+    return normalizedResourcePath;
+  }
+
+  if (!normalizedResourcePath) {
+    return normalizedCardPath;
+  }
+
   return `${normalizedCardPath}/${normalizedResourcePath}`;
 }
 

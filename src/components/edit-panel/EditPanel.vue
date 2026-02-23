@@ -180,6 +180,7 @@ defineExpose({
           class="edit-panel__editor"
         >
           <PluginHost
+            :card-id="cardStore.activeCardId ?? undefined"
             :card-type="selectedBaseCard.type"
             :base-card-id="selectedBaseCard.id"
             :config="selectedBaseCard.config ?? {}"

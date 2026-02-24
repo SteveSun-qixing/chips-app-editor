@@ -21,6 +21,20 @@ export const zhCN = {
     delete: '删除',
     untitled_card: '未命名卡片',
   },
+  editor: {
+    card_initializer: {
+      error: {
+        invalid_card_id: '卡片 ID 格式不正确',
+        invalid_name: '卡片名称不合法',
+        create_directory_failed: '创建卡片目录失败',
+        write_file_failed: '写入卡片文件失败',
+        card_exists: '卡片已存在',
+      },
+      success: {
+        card_created: '卡片创建成功',
+      },
+    },
+  },
   plugin_host: {
     loading: '正在加载插件...',
     error: '插件加载失败',
@@ -523,6 +537,20 @@ export const enUS = {
     paste: 'Paste',
     delete: 'Delete',
     untitled_card: 'Untitled Card',
+  },
+  editor: {
+    card_initializer: {
+      error: {
+        invalid_card_id: 'Invalid card ID format',
+        invalid_name: 'Invalid card name',
+        create_directory_failed: 'Failed to create card directory',
+        write_file_failed: 'Failed to write card files',
+        card_exists: 'Card already exists',
+      },
+      success: {
+        card_created: 'Card created successfully',
+      },
+    },
   },
   plugin_host: {
     loading: 'Loading plugin...',

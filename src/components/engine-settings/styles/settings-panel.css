@@ -21,14 +21,14 @@
   margin: 0;
   font-size: var(--chips-font-size-lg, 18px);
   font-weight: var(--chips-font-weight-semibold, 600);
-  color: var(--chips-color-text, #111827);
+  color: var(--chips-color-text, #0f172a);
   line-height: var(--chips-line-height-normal, 1.5);
 }
 
 .settings-panel-header__desc {
   margin: 0;
   font-size: var(--chips-font-size-sm, 14px);
-  color: var(--chips-color-text-secondary, #6b7280);
+  color: var(--chips-color-text-secondary, #475569);
   line-height: var(--chips-line-height-normal, 1.5);
 }
 
@@ -40,7 +40,7 @@
   flex-direction: column;
   gap: var(--chips-spacing-sm, 8px);
   padding: var(--chips-spacing-md, 16px);
-  border: 1px solid var(--chips-color-border, #e5e7eb);
+  border: 1px solid var(--chips-color-border, #d1d5db);
   border-radius: var(--chips-radius-md, 8px);
   margin-bottom: var(--chips-spacing-md, 16px);
   background: var(--chips-color-surface, #ffffff);
@@ -55,12 +55,12 @@
 .settings-field__label {
   font-size: var(--chips-font-size-sm, 14px);
   font-weight: var(--chips-font-weight-medium, 500);
-  color: var(--chips-color-text, #111827);
+  color: var(--chips-color-text, #0f172a);
 }
 
 .settings-field__desc {
   font-size: 12px;
-  color: var(--chips-color-text-secondary, #6b7280);
+  color: var(--chips-color-text-secondary, #475569);
   line-height: var(--chips-line-height-normal, 1.5);
 }
 
@@ -83,7 +83,7 @@
   flex-shrink: 0;
   font-size: var(--chips-font-size-sm, 14px);
   font-weight: var(--chips-font-weight-medium, 500);
-  color: var(--chips-color-primary, #3b82f6);
+  color: var(--chips-color-primary, #2563eb);
   min-width: 48px;
   text-align: right;
 }
@@ -96,7 +96,7 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--chips-spacing-md, 16px);
-  border: 1px solid var(--chips-color-border, #e5e7eb);
+  border: 1px solid var(--chips-color-border, #d1d5db);
   border-radius: var(--chips-radius-md, 8px);
   margin-bottom: var(--chips-spacing-md, 16px);
   background: var(--chips-color-surface, #ffffff);
@@ -114,12 +114,12 @@
 .settings-row__label {
   font-size: var(--chips-font-size-sm, 14px);
   font-weight: var(--chips-font-weight-medium, 500);
-  color: var(--chips-color-text, #111827);
+  color: var(--chips-color-text, #0f172a);
 }
 
 .settings-row__desc {
   font-size: 12px;
-  color: var(--chips-color-text-secondary, #6b7280);
+  color: var(--chips-color-text-secondary, #475569);
   line-height: var(--chips-line-height-normal, 1.5);
 }
 
@@ -137,7 +137,7 @@
   flex-direction: column;
   gap: var(--chips-spacing-sm, 8px);
   padding: var(--chips-spacing-sm, 8px);
-  border: 2px solid var(--chips-color-border, #e5e7eb);
+  border: 2px solid var(--chips-color-border, #d1d5db);
   border-radius: var(--chips-radius-lg, 12px);
   background: var(--chips-color-surface, #ffffff);
   cursor: pointer;
@@ -185,12 +185,12 @@
 .settings-option-card__name {
   font-size: var(--chips-font-size-sm, 14px);
   font-weight: var(--chips-font-weight-medium, 500);
-  color: var(--chips-color-text, #111827);
+  color: var(--chips-color-text, #0f172a);
 }
 
 .settings-option-card__desc {
   font-size: 12px;
-  color: var(--chips-color-text-secondary, #6b7280);
+  color: var(--chips-color-text-secondary, #475569);
   line-height: var(--chips-line-height-normal, 1.5);
 }
 
@@ -208,7 +208,7 @@
   align-items: baseline;
   gap: var(--chips-spacing-md, 16px);
   padding: var(--chips-spacing-sm, 8px) 0;
-  border-bottom: 1px solid var(--chips-color-border, #e5e7eb);
+  border-bottom: 1px solid var(--chips-color-border, #d1d5db);
 }
 
 .settings-info-item:last-child {
@@ -219,12 +219,12 @@
   flex-shrink: 0;
   min-width: 100px;
   font-size: var(--chips-font-size-sm, 14px);
-  color: var(--chips-color-text-secondary, #6b7280);
+  color: var(--chips-color-text-secondary, #475569);
 }
 
 .settings-info-item__value {
   font-size: var(--chips-font-size-sm, 14px);
-  color: var(--chips-color-text, #111827);
+  color: var(--chips-color-text, #0f172a);
   word-break: break-all;
 }
 
@@ -247,7 +247,7 @@
   justify-content: center;
   gap: var(--chips-spacing-sm, 8px);
   padding: var(--chips-spacing-xl, 32px);
-  color: var(--chips-color-text-secondary, #6b7280);
+  color: var(--chips-color-text-secondary, #475569);
 }
 
 .settings-empty__icon {

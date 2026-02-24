@@ -33,12 +33,93 @@ let conversionApi: ConversionAPI | null = null;
 let _workspaceRoot = '';
 let _externalRoot = '';
 
+function normalizePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
+}
+
+function normalizeRootPath(path: string): string {
+  const normalized = normalizePath(path);
+  if (!normalized || normalized === '/') {
+    return normalized;
+  }
+  return normalized.replace(/\/+$/, '');
+}
+
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
+}
+
+function joinPath(base: string, relative: string): string {
+  const cleanBase = base.replace(/\/+$/, '');
+  const cleanRelative = relative.replace(/^\/+/, '');
+  return cleanRelative ? `${cleanBase}/${cleanRelative}` : cleanBase;
+}
+
+function resolveAliasPath(path: string, root: string): string | null {
+  if (!root || !isAbsolutePath(root)) {
+    return null;
+  }
+
+  const rootName = root.split('/').filter(Boolean).pop() ?? '';
+  if (!rootName) {
+    return null;
+  }
+
+  if (path === rootName) {
+    return root;
+  }
+
+  if (path.startsWith(`${rootName}/`)) {
+    return joinPath(root, path.slice(rootName.length + 1));
+  }
+
+  return null;
+}
+
+function resolveBridgePath(path: string): string {
+  const normalizedPath = normalizePath(path);
+  if (!normalizedPath || isAbsolutePath(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  const workspaceRoot = normalizePath(_workspaceRoot);
+  const externalRoot = normalizePath(_externalRoot);
+
+  const aliasResolvedFromWorkspace = resolveAliasPath(normalizedPath, workspaceRoot);
+  if (aliasResolvedFromWorkspace) {
+    return aliasResolvedFromWorkspace;
+  }
+
+  const aliasResolvedFromExternal = resolveAliasPath(normalizedPath, externalRoot);
+  if (aliasResolvedFromExternal) {
+    return aliasResolvedFromExternal;
+  }
+
+  if (workspaceRoot && isAbsolutePath(workspaceRoot)) {
+    return joinPath(workspaceRoot, normalizedPath);
+  }
+
+  if (externalRoot && isAbsolutePath(externalRoot)) {
+    return joinPath(externalRoot, normalizedPath);
+  }
+
+  return normalizedPath;
+}
+
+function resolveRequiredBridgePath(path: string): string {
+  const resolvedPath = resolveBridgePath(path);
+  if (!resolvedPath || !isAbsolutePath(resolvedPath)) {
+    throw new Error(`[ResourceService] Path must resolve to an absolute path: ${path}`);
+  }
+  return resolvedPath;
+}
+
 /**
  * 设置工作区路径（由插件初始化时调用）
  */
 export function setWorkspacePaths(workspaceRoot: string, externalRoot: string): void {
-  _workspaceRoot = workspaceRoot;
-  _externalRoot = externalRoot;
+  _workspaceRoot = normalizeRootPath(workspaceRoot);
+  _externalRoot = normalizeRootPath(externalRoot);
 }
 
 async function ensureInitialized(): Promise<void> {
@@ -60,6 +141,7 @@ export const resourceService = {
 
   async readText(path: string): Promise<string> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request<{
       content: string;
       encoding: string;
@@ -67,7 +149,7 @@ export const resourceService = {
     }>({
       service: 'file',
       method: 'read',
-      payload: { path, encoding: 'utf8' },
+      payload: { path: resolvedPath, encoding: 'utf8' },
     });
     if (!response.success || !response.data) {
       throw new Error(response.error || 'Read failed');
@@ -77,6 +159,7 @@ export const resourceService = {
 
   async readBinary(path: string): Promise<ArrayBuffer> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request<{
       content: string;
       encoding: string;
@@ -84,7 +167,7 @@ export const resourceService = {
     }>({
       service: 'file',
       method: 'read',
-      payload: { path, encoding: 'base64', mode: 'buffer' },
+      payload: { path: resolvedPath, encoding: 'base64', mode: 'buffer' },
     });
     if (!response.success || !response.data) {
       throw new Error(response.error || 'Read failed');
@@ -100,10 +183,11 @@ export const resourceService = {
 
   async writeText(path: string, content: string): Promise<void> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'write',
-      payload: { path, content, encoding: 'utf8', createDirs: true },
+      payload: { path: resolvedPath, content, encoding: 'utf8', createDirs: true },
     });
     if (!response.success) {
       throw new Error(response.error || 'Write failed');
@@ -112,6 +196,7 @@ export const resourceService = {
 
   async writeBinary(path: string, content: ArrayBuffer): Promise<void> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     // Encode ArrayBuffer to base64
     const bytes = new Uint8Array(content);
     let binary = '';
@@ -122,7 +207,7 @@ export const resourceService = {
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'write',
-      payload: { path, content: base64Content, encoding: 'base64', createDirs: true },
+      payload: { path: resolvedPath, content: base64Content, encoding: 'base64', createDirs: true },
     });
     if (!response.success) {
       throw new Error(response.error || 'Write failed');
@@ -131,10 +216,11 @@ export const resourceService = {
 
   async ensureDir(path: string): Promise<void> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'mkdir',
-      payload: { path, recursive: true },
+      payload: { path: resolvedPath, recursive: true },
     });
     if (!response.success && response.error) {
       throw new Error(response.error);
@@ -143,20 +229,22 @@ export const resourceService = {
 
   async exists(path: string): Promise<boolean> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request<{ exists: boolean }>({
       service: 'file',
       method: 'exists',
-      payload: { path },
+      payload: { path: resolvedPath },
     });
     return response.success && response.data?.exists === true;
   },
 
   async delete(path: string): Promise<void> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'delete',
-      payload: { path, force: true },
+      payload: { path: resolvedPath, force: true },
     });
     if (!response.success) {
       throw new Error(response.error || 'Delete failed');
@@ -165,12 +253,13 @@ export const resourceService = {
 
   async list(path: string): Promise<string[]> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     const response = await (
       await getEditorConnector()
     ).request<{ entries: Array<{ name: string; type: string }> }>({
       service: 'file',
       method: 'list',
-      payload: { path },
+      payload: { path: resolvedPath },
     });
     if (!response.success || !response.data) {
       return [];
@@ -187,14 +276,15 @@ export const resourceService = {
     modified?: string;
   }> {
     await ensureInitialized();
+    const resolvedPath = resolveRequiredBridgePath(path);
     // First check if path exists
     const existsResponse = await (await getEditorConnector()).request<{ exists: boolean }>({
       service: 'file',
       method: 'exists',
-      payload: { path },
+      payload: { path: resolvedPath },
     });
     if (!existsResponse.success || !existsResponse.data?.exists) {
-      return { path, exists: false, isDirectory: false, isFile: false };
+      return { path: resolvedPath, exists: false, isDirectory: false, isFile: false };
     }
     // Then get stat info
     const response = await (
@@ -208,13 +298,13 @@ export const resourceService = {
     }>({
       service: 'file',
       method: 'stat',
-      payload: { path },
+      payload: { path: resolvedPath },
     });
     if (!response.success || !response.data) {
-      return { path, exists: true, isDirectory: false, isFile: false };
+      return { path: resolvedPath, exists: true, isDirectory: false, isFile: false };
     }
     return {
-      path,
+      path: resolvedPath,
       exists: true,
       isDirectory: response.data.isDirectory,
       isFile: response.data.isFile,
@@ -254,9 +344,11 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.convertToHTML(
-      { type: 'path', path: sourcePath, fileType: 'card' },
-      { ...options, outputPath }
+      { type: 'path', path: resolvedSourcePath, fileType: 'card' },
+      { ...options, outputPath: resolvedOutputPath }
     );
   },
 
@@ -269,9 +361,11 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.convertToPDF(
-      { type: 'path', path: sourcePath, fileType: 'card' },
-      { ...options, outputPath }
+      { type: 'path', path: resolvedSourcePath, fileType: 'card' },
+      { ...options, outputPath: resolvedOutputPath }
     );
   },
 
@@ -284,9 +378,11 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
     return conversionApi.convertToImage(
-      { type: 'path', path: sourcePath, fileType: 'card' },
-      { ...options, outputPath }
+      { type: 'path', path: resolvedSourcePath, fileType: 'card' },
+      { ...options, outputPath: resolvedOutputPath }
     );
   },
 
@@ -295,15 +391,18 @@ export const resourceService = {
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
-    return conversionApi.exportAsCard(cardId, { outputPath });
+    const resolvedOutputPath = resolveRequiredBridgePath(outputPath);
+    return conversionApi.exportAsCard(cardId, { outputPath: resolvedOutputPath });
   },
 
   async copy(sourcePath: string, destPath: string): Promise<void> {
     await ensureInitialized();
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedDestPath = resolveRequiredBridgePath(destPath);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'copy',
-      payload: { sourcePath, destPath },
+      payload: { source: resolvedSourcePath, target: resolvedDestPath },
     });
     if (!response.success) {
       throw new Error(response.error || 'Copy failed');
@@ -312,10 +411,12 @@ export const resourceService = {
 
   async move(sourcePath: string, destPath: string): Promise<void> {
     await ensureInitialized();
+    const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
+    const resolvedDestPath = resolveRequiredBridgePath(destPath);
     const response = await (await getEditorConnector()).request({
       service: 'file',
       method: 'move',
-      payload: { sourcePath, destPath },
+      payload: { source: resolvedSourcePath, target: resolvedDestPath },
     });
     if (!response.success) {
       throw new Error(response.error || 'Move failed');

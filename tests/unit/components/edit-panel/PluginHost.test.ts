@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mount, VueWrapper } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { nextTick } from 'vue';
+import { nextTick, reactive } from 'vue';
 import PluginHost from '@/components/edit-panel/PluginHost.vue';
 import { useCardStore, useEditorStore } from '@/core/state';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
@@ -15,6 +15,12 @@ const { getEditorRuntimeMock, getLocalPluginVocabularyMock, getCardPluginPermiss
   getEditorRuntimeMock: vi.fn(),
   getLocalPluginVocabularyMock: vi.fn(),
   getCardPluginPermissionsMock: vi.fn(),
+}));
+
+const { resourceServiceMock } = vi.hoisted(() => ({
+  resourceServiceMock: {
+    workspaceRoot: '/ProductFinishedProductTestingSpace/TestWorkspace',
+  },
 }));
 
 vi.mock('@/services/plugin-service', () => ({
@@ -35,6 +41,10 @@ vi.mock('@/components/edit-panel/DefaultEditor.vue', () => ({
 
 vi.mock('@/services/card-persistence-service', () => ({
   saveCardToWorkspace: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/services/resource-service', () => ({
+  resourceService: resourceServiceMock,
 }));
 
 describe('PluginHost', () => {
@@ -107,6 +117,35 @@ describe('PluginHost', () => {
     cardStore.addCard(mockCard);
     cardStore.setActiveCard('card-001');
     cardStore.setSelectedBaseCard('base-001');
+  }
+
+  function setupStoreWithSecondaryCard(): void {
+    const secondaryCard = {
+      id: 'card-002',
+      metadata: {
+        chip_standards_version: '1.0.0',
+        card_id: 'card-002',
+        name: 'Second Card',
+        created_at: '2026-01-01T00:00:00Z',
+        modified_at: '2026-01-01T00:00:00Z',
+      },
+      structure: {
+        structure: [
+          {
+            id: 'base-201',
+            type: 'TextCard',
+            config: { text: 'Second card content' },
+          },
+        ],
+        manifest: {
+          card_count: 1,
+          resource_count: 0,
+          resources: [],
+        },
+      },
+    };
+
+    cardStore.addCard(secondaryCard, 'TestWorkspace/card-002');
   }
 
   /**
@@ -348,6 +387,29 @@ describe('PluginHost', () => {
 
       expect(saveCardToWorkspace).toHaveBeenCalledTimes(2);
     });
+
+    it('传入 cardId 时应保存对应卡片而非当前 activeCard', async () => {
+      setupStoreWithSecondaryCard();
+
+      wrapper = mountComponent({
+        cardId: 'card-002',
+        baseCardId: 'base-201',
+        config: { text: 'Second card content' },
+      });
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.isLoading = false;
+      vm.hasUnsavedChanges = true;
+
+      await vm.saveConfig();
+
+      expect(saveCardToWorkspace).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(saveCardToWorkspace).mock.calls[0]?.[0]?.id).toBe('card-002');
+      expect(vi.mocked(saveCardToWorkspace).mock.calls[0]?.[1]).toBe(
+        '/ProductFinishedProductTestingSpace/TestWorkspace/card-002',
+      );
+    });
   });
 
   describe('iframe 多语言桥接', () => {
@@ -503,6 +565,86 @@ describe('PluginHost', () => {
   });
 
   describe('iframe 安全桥接', () => {
+    it('init 消息应归一化响应式配置并保持可克隆', async () => {
+      editorStore.setLocale('en-US');
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+      getLocalPluginVocabularyMock.mockResolvedValue({
+        'toolbar.bold': 'Bold',
+      });
+
+      const reactiveConfig = reactive({
+        sections: reactive([
+          reactive({
+            title: '封面',
+            path: 'images/photo.png',
+          }),
+        ]),
+      });
+
+      wrapper = mountComponent({
+        cardType: 'RichTextCard',
+        config: reactiveConfig as unknown as Record<string, unknown>,
+      });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      const postMessage = vi.fn((message: unknown) => {
+        expect(() => structuredClone(message)).not.toThrow();
+      });
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: { postMessage },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(postMessage).toHaveBeenCalled();
+      const initPayload = postMessage.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(initPayload.type).toBe('init');
+      expect((initPayload.payload as Record<string, unknown>).config).toEqual({
+        sections: [
+          {
+            title: '封面',
+            path: 'images/photo.png',
+          },
+        ],
+      });
+      expect(vm.loadError).toBeNull();
+    });
+
+    it('init 消息发送失败时应设置错误并触发 plugin-error', async () => {
+      getEditorRuntimeMock.mockResolvedValue({
+        mode: 'iframe',
+        pluginId: 'chips-official.rich-text-card',
+        iframeUrl: 'https://example.com/editor/index.html',
+      });
+
+      wrapper = mountComponent({ cardType: 'RichTextCard' });
+      await nextTick();
+      await (wrapper.vm as any).reload();
+      await nextTick();
+
+      const vm = wrapper.vm as any;
+      vm.pluginIframeRef = {
+        contentWindow: {
+          postMessage: vi.fn(() => {
+            throw new Error('postMessage failed');
+          }),
+        },
+      };
+
+      await vm.handleIframeLoad();
+
+      expect(vm.loadError).toBeInstanceOf(Error);
+      expect((vm.loadError as Error).message).toContain('Failed to send iframe init message');
+      expect(wrapper.emitted('plugin-error')).toBeTruthy();
+    });
+
     it('应拒绝未声明权限的 bridge 请求', async () => {
       getEditorRuntimeMock.mockResolvedValue({
         mode: 'iframe',

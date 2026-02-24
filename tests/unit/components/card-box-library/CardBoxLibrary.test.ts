@@ -60,20 +60,20 @@ describe('CardBoxLibrary', () => {
       expect(true).toBe(true);
     });
 
-    it('should show correct count in card tab', () => {
+    it('should not show count badge in card tab', () => {
       wrapper = mount(CardBoxLibrary);
 
       const cardTab = wrapper.findAll('.card-box-library__tab')[0];
       const count = cardTab.find('.card-box-library__tab-count');
-      expect(count.text()).toBe(String(cardTypes.length));
+      expect(count.exists()).toBe(false);
     });
 
-    it('should show correct count in box tab', () => {
+    it('should not show count badge in box tab', () => {
       wrapper = mount(CardBoxLibrary);
 
       const boxTab = wrapper.findAll('.card-box-library__tab')[1];
       const count = boxTab.find('.card-box-library__tab-count');
-      expect(count.text()).toBe(String(layoutTypes.length));
+      expect(count.exists()).toBe(false);
     });
   });
 

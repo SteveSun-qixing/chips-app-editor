@@ -24,6 +24,8 @@
 import type { EventEmitter } from './event-manager';
 import { createEventEmitter } from './event-manager';
 import { resourceService } from '@/services/resource-service';
+import { t as translate } from '@/services/i18n-service';
+import { getEditorConnector } from '@/services/sdk-service';
 import { createBaseCardContentDocument } from './base-card-content-loader';
 import { generateId62, isValidId62 } from '@/utils';
 
@@ -224,96 +226,6 @@ function generateDefaultCoverHtml(cardName: string): string {
 </html>`;
 }
 
-/**
- * 将对象转换为 YAML 格式字符串
- * 简单实现，用于生成配置文件
- * @param obj - 要转换的对象
- * @param indent - 缩进级别
- * @returns YAML 格式字符串
- */
-function toYaml(obj: unknown, indent = 0): string {
-  const spaces = '  '.repeat(indent);
-  
-  if (obj === null || obj === undefined) {
-    return 'null';
-  }
-  
-  if (typeof obj === 'string') {
-    // 如果字符串包含特殊字符，使用引号
-    if (obj.includes('\n') || obj.includes(':') || obj.includes('#') || 
-        obj.includes("'") || obj.includes('"') || obj.startsWith(' ') ||
-        obj.endsWith(' ') || obj === '') {
-      return `"${obj.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
-    }
-    return obj;
-  }
-  
-  if (typeof obj === 'number' || typeof obj === 'boolean') {
-    return String(obj);
-  }
-  
-  if (Array.isArray(obj)) {
-    if (obj.length === 0) {
-      return '[]';
-    }
-    return obj.map(item => {
-      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-        // 对象数组项：第一个属性紧跟 -，后续属性对齐
-        const entries = Object.entries(item as Record<string, unknown>);
-        if (entries.length === 0) {
-          return `${spaces}- {}`;
-        }
-        const firstEntry = entries[0];
-        if (!firstEntry) {
-          return `${spaces}- {}`;
-        }
-        const [firstKey, firstEntryValue] = firstEntry;
-        const firstValue = typeof firstEntryValue === 'object' && firstEntryValue !== null
-          ? `\n${toYaml(firstEntryValue, indent + 2)}`
-          : ` ${toYaml(firstEntryValue, 0)}`;
-        const firstLine = `${spaces}- ${firstKey}:${firstValue}`;
-        
-        const restLines = entries.slice(1).map(([key, value]) => {
-          if (typeof value === 'object' && value !== null) {
-            if (Array.isArray(value) && value.length === 0) {
-              return `${spaces}  ${key}: []`;
-            }
-            if (!Array.isArray(value) && Object.keys(value).length === 0) {
-              return `${spaces}  ${key}: {}`;
-            }
-            return `${spaces}  ${key}:\n${toYaml(value, indent + 2)}`;
-          }
-          return `${spaces}  ${key}: ${toYaml(value, 0)}`;
-        });
-        
-        return [firstLine, ...restLines].join('\n');
-      }
-      return `${spaces}- ${toYaml(item, 0)}`;
-    }).join('\n');
-  }
-  
-  if (typeof obj === 'object') {
-    const entries = Object.entries(obj as Record<string, unknown>);
-    if (entries.length === 0) {
-      return '{}';
-    }
-    return entries.map(([key, value]) => {
-      if (typeof value === 'object' && value !== null) {
-        if (Array.isArray(value) && value.length === 0) {
-          return `${spaces}${key}: []`;
-        }
-        if (!Array.isArray(value) && Object.keys(value).length === 0) {
-          return `${spaces}${key}: {}`;
-        }
-        return `${spaces}${key}:\n${toYaml(value, indent + 1)}`;
-      }
-      return `${spaces}${key}: ${toYaml(value, indent)}`;
-    }).join('\n');
-  }
-  
-  return String(obj);
-}
-
 // ========== 卡片初始化器类 ==========
 
 /**
@@ -420,22 +332,31 @@ export function createCardInitializer(
   }
 
   /**
+   * 通过基础服务序列化 YAML
+   * @param data - 待序列化数据
+   */
+  async function stringifyYaml(data: unknown): Promise<string> {
+    const connector = await getEditorConnector();
+    const response = await connector.request<{ text?: string }>({
+      service: 'serializer',
+      method: 'stringifyYaml',
+      payload: { data },
+    });
+
+    if (!response.success || !response.data || typeof response.data.text !== 'string') {
+      throw new Error(response.error || 'Serializer stringifyYaml failed');
+    }
+
+    return response.data.text;
+  }
+
+  /**
    * 获取多语言文本
    * @param key - 翻译键
    * @param params - 插值参数
    */
   function t(key: string, params?: Record<string, string | number>): string {
-    // TODO: 通过 SDK 获取多语言文本
-    // return sdk.i18n.t(key, params);
-    
-    // 临时返回 key，实际集成时替换为 i18n 调用
-    if (params) {
-      return Object.entries(params).reduce(
-        (str, [k, v]) => str.replace(`{${k}}`, String(v)),
-        key
-      );
-    }
-    return key;
+    return translate(key, params);
   }
 
   /**
@@ -493,6 +414,7 @@ export function createCardInitializer(
     initialBasicCard?: BasicCardConfig
   ): Promise<CardInitResult> {
     const createdFiles: string[] = [];
+    let errorI18nKey = I18N_KEYS.ERROR_CREATE_DIRECTORY_FAILED;
     
     try {
       // 1. 验证输入参数
@@ -554,16 +476,18 @@ export function createCardInitializer(
       await createDirectory(contentPath);
       await createDirectory(cardcoverPath);
 
+      errorI18nKey = I18N_KEYS.ERROR_WRITE_FILE_FAILED;
+
       // 5. 生成并写入 metadata.yaml
       const metadata = generateMetadata(cardId, name.trim());
       const metadataPath = `${cardConfigPath}/metadata.yaml`;
-      await writeFile(metadataPath, toYaml(metadata));
+      await writeFile(metadataPath, await stringifyYaml(metadata));
       createdFiles.push(metadataPath);
 
       // 6. 生成并写入 structure.yaml
       const structure = generateStructure(initialBasicCard);
       const structurePath = `${cardConfigPath}/structure.yaml`;
-      await writeFile(structurePath, toYaml(structure));
+      await writeFile(structurePath, await stringifyYaml(structure));
       createdFiles.push(structurePath);
 
       // 7. 生成并写入 cover.html
@@ -576,7 +500,7 @@ export function createCardInitializer(
       if (initialBasicCard) {
         const basicCardConfig = generateBasicCardConfig(initialBasicCard);
         const basicCardPath = `${contentPath}/${initialBasicCard.id}.yaml`;
-        await writeFile(basicCardPath, toYaml(basicCardConfig));
+        await writeFile(basicCardPath, await stringifyYaml(basicCardConfig));
         createdFiles.push(basicCardPath);
       }
 
@@ -615,7 +539,7 @@ export function createCardInitializer(
         success: false,
         cardPath: `${workspaceRoot}/${fallbackFolderName}`,
         createdFiles,
-        error: t(I18N_KEYS.ERROR_CREATE_DIRECTORY_FAILED) + `: ${errorMessage}`,
+        error: `${t(errorI18nKey)}: ${errorMessage}`,
         errorCode: 'SYS-9001',
       };
     }

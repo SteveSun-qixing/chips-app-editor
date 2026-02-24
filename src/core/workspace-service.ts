@@ -18,7 +18,7 @@ export interface WorkspaceFile {
   id: string;
   /** 文件名 */
   name: string;
-  /** 相对路径 */
+  /** 绝对路径 */
   path: string;
   /** 文件类型 */
   type: 'card' | 'box' | 'folder';
@@ -83,33 +83,19 @@ export interface WorkspaceService {
   openFileByPath: (filePath: string) => Promise<void>;
 }
 
-function getRootPrefix(): string {
-  const root = resourceService.workspaceRoot;
-  if (!root) return '';
-  return root.split('/').slice(0, -1).join('/');
+function normalizePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+/g, '/');
 }
 
-function toRootRelative(path: string): string {
-  const rootPrefix = getRootPrefix();
-  if (rootPrefix && path.startsWith(rootPrefix + '/')) {
-    return path.slice(rootPrefix.length + 1);
-  }
-  if (path.startsWith('/')) {
-    return path.slice(1);
-  }
-  return path;
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:\//.test(path);
 }
 
-function toAbsolute(path: string): string {
-  const rootPrefix = getRootPrefix();
-  if (!rootPrefix) return path;
-  if (path.startsWith(rootPrefix + '/')) {
+function trimTrailingSlash(path: string): string {
+  if (path === '/') {
     return path;
   }
-  if (path.startsWith('/')) {
-    return `${rootPrefix}${path}`;
-  }
-  return `${rootPrefix}/${path}`;
+  return path.replace(/\/+$/, '');
 }
 
 function joinPath(...parts: string[]): string {
@@ -118,6 +104,43 @@ function joinPath(...parts: string[]): string {
     .join('/')
     .replace(/\\/g, '/')
     .replace(/\/+/g, '/');
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  if (!rootPath || !candidatePath) {
+    return false;
+  }
+  if (candidatePath === rootPath) {
+    return true;
+  }
+  return candidatePath.startsWith(`${rootPath}/`);
+}
+
+function resolveWorkspacePath(path: string, workspaceRoot: string): string {
+  const normalizedPath = normalizePath(path);
+  if (!normalizedPath) {
+    return '';
+  }
+
+  if (isAbsolutePath(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  const normalizedWorkspaceRoot = trimTrailingSlash(normalizePath(workspaceRoot));
+  if (!normalizedWorkspaceRoot || !isAbsolutePath(normalizedWorkspaceRoot)) {
+    return '';
+  }
+
+  const workspaceFolder = normalizedWorkspaceRoot.split('/').filter(Boolean).pop() ?? '';
+  if (
+    workspaceFolder
+    && (normalizedPath === workspaceFolder || normalizedPath.startsWith(`${workspaceFolder}/`))
+  ) {
+    const remainder = normalizedPath.slice(workspaceFolder.length).replace(/^\/+/, '');
+    return joinPath(normalizedWorkspaceRoot, remainder);
+  }
+
+  return joinPath(normalizedWorkspaceRoot, normalizedPath);
 }
 
 function stripExtension(name: string, ext: string): string {
@@ -153,8 +176,8 @@ function getMetadataString(metadata: Record<string, unknown> | null, key: string
 export function createWorkspaceService(events?: EventEmitter): WorkspaceService {
   const eventEmitter = events || createEventEmitter();
 
-  /** 延迟计算的工作区相对路径 */
-  let workspaceRootRelative = '';
+  /** 工作区绝对路径 */
+  let workspaceRootPath = '';
 
   /** 工作区状态 */
   const state = ref<WorkspaceState>({
@@ -171,9 +194,19 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
   const isInitialized = computed(() => state.value.initialized);
 
   function resolveParentPath(parentPath?: string): string {
-    if (!parentPath) return workspaceRootRelative;
-    const relative = toRootRelative(parentPath);
-    return relative.startsWith(workspaceRootRelative) ? relative : workspaceRootRelative;
+    if (!workspaceRootPath) {
+      return '';
+    }
+    if (!parentPath) {
+      return workspaceRootPath;
+    }
+
+    const resolvedPath = resolveWorkspacePath(parentPath, workspaceRootPath);
+    if (!resolvedPath) {
+      return workspaceRootPath;
+    }
+
+    return isPathInside(workspaceRootPath, resolvedPath) ? resolvedPath : workspaceRootPath;
   }
 
   /**
@@ -292,22 +325,29 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 初始化工作区
    */
   async function initialize(): Promise<void> {
-    if (state.value.initialized) return;
+    const nextRootPath = trimTrailingSlash(normalizePath(resourceService.workspaceRoot));
+    const hasRootChanged = state.value.rootPath !== nextRootPath;
+    if (state.value.initialized && !hasRootChanged) return;
 
     try {
-      // 在初始化时计算工作区相对路径（此时 setWorkspacePaths 可能尚未被调用）
-      workspaceRootRelative = toRootRelative(resourceService.workspaceRoot);
-      state.value.rootPath = resourceService.workspaceRoot;
+      workspaceRootPath = '';
+      state.value.rootPath = nextRootPath;
 
-      // 仅在工作区路径已设置时创建目录和扫描文件
-      if (workspaceRootRelative) {
+      if (nextRootPath) {
+        if (!isAbsolutePath(nextRootPath)) {
+          throw new Error('[WorkspaceService] Workspace root must be an absolute path');
+        }
+
+        workspaceRootPath = nextRootPath;
         try {
-          await resourceService.ensureDir(workspaceRootRelative);
+          await resourceService.ensureDir(workspaceRootPath);
         } catch (err) {
           // ensureDir 失败不阻塞初始化（目录可能已存在）
           console.warn('[WorkspaceService] ensureDir skipped:', err);
         }
         await refresh();
+      } else {
+        state.value.files = [];
       }
 
       state.value.initialized = true;
@@ -330,8 +370,10 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
     parentPath?: string
   ): Promise<WorkspaceFile> {
     const id = cardId || generateId62();
-    const parent = resolveParentPath(parentPath);
-    const parentAbsolute = toAbsolute(parent);
+    const parentAbsolute = resolveParentPath(parentPath);
+    if (!parentAbsolute) {
+      throw new Error('[WorkspaceService] Workspace root is not configured');
+    }
     const initializer = createCardInitializer({ workspaceRoot: parentAbsolute });
 
     const result = await initializer.createCard(id, name, initialContent);
@@ -340,7 +382,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
     }
 
     await refresh();
-    const targetPath = toRootRelative(result.cardPath);
+    const targetPath = resolveWorkspacePath(result.cardPath, workspaceRootPath);
     const file = findFileByPath(state.value.files, targetPath);
     if (file) {
       eventEmitter.emit('workspace:file-created', { file, content: initialContent });
@@ -367,6 +409,9 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
     const timestamp = now();
     const boxId = generateId62();
     const parent = resolveParentPath(parentPath);
+    if (!parent) {
+      throw new Error('[WorkspaceService] Workspace root is not configured');
+    }
     const boxFolderName = `${boxId}.box`;
     const boxPath = joinPath(parent, boxFolderName);
     const metaDir = joinPath(boxPath, '.box');
@@ -418,6 +463,9 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
   async function createFolder(name: string, parentPath?: string): Promise<WorkspaceFile> {
     const timestamp = now();
     const parent = resolveParentPath(parentPath);
+    if (!parent) {
+      throw new Error('[WorkspaceService] Workspace root is not configured');
+    }
     const folderPath = joinPath(parent, name.trim());
 
     await resourceService.ensureDir(folderPath);
@@ -495,7 +543,13 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 刷新文件列表
    */
   async function refresh(): Promise<void> {
-    state.value.files = await buildTree(workspaceRootRelative);
+    if (!workspaceRootPath) {
+      state.value.files = [];
+      eventEmitter.emit('workspace:refreshed', { files: state.value.files });
+      return;
+    }
+
+    state.value.files = await buildTree(workspaceRootPath);
     eventEmitter.emit('workspace:refreshed', { files: state.value.files });
   }
 
@@ -536,11 +590,16 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 用于从启动参数中自动打开指定文件
    */
   async function openFileByPath(filePath: string): Promise<void> {
-    const relativePath = toRootRelative(filePath);
-    let file = findFileByPath(state.value.files, relativePath);
+    const targetPath = resolveWorkspacePath(filePath, workspaceRootPath);
+    if (!targetPath) {
+      console.warn('[WorkspaceService] Invalid file path:', filePath);
+      return;
+    }
+
+    let file = findFileByPath(state.value.files, targetPath);
     if (!file) {
       await refresh();
-      file = findFileByPath(state.value.files, relativePath);
+      file = findFileByPath(state.value.files, targetPath);
     }
     if (file) {
       openFile(file.id);

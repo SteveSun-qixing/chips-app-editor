@@ -282,17 +282,20 @@ defineExpose({
   position: absolute;
   background: var(--chips-color-surface, #ffffff);
   border-radius: var(--chips-radius-md, 8px);
-  box-shadow: var(--chips-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--chips-color-border-light, #e5e7eb);
+  box-shadow: var(--chips-shadow-window, 0 8px 24px -4px rgba(0, 0, 0, 0.14));
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: box-shadow var(--chips-transition-fast, 0.15s) ease;
+  transition: box-shadow var(--chips-transition-fast, 0.15s) ease,
+              border-color var(--chips-transition-fast, 0.15s) ease;
 }
 
 .base-window--dragging {
   cursor: grabbing;
   user-select: none;
-  box-shadow: var(--chips-shadow-xl, 0 12px 32px rgba(0, 0, 0, 0.2));
+  box-shadow: var(--chips-shadow-xl, 0 20px 30px -5px rgba(0, 0, 0, 0.18));
+  border-color: var(--chips-color-primary-light, #3b82f6);
 }
 
 .base-window--resizing {
@@ -304,7 +307,7 @@ defineExpose({
 }
 
 .base-window--focused {
-  box-shadow: var(--chips-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+  box-shadow: var(--chips-shadow-window-focused, 0 12px 32px -4px rgba(0, 0, 0, 0.18));
 }
 
 .base-window__header {
@@ -312,7 +315,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 12px);
-  background: var(--chips-color-surface-variant, #f5f5f5);
+  background: var(--chips-color-surface-variant, #f7f8fa);
+  border-bottom: 1px solid var(--chips-color-border-light, #e5e7eb);
   cursor: grab;
   user-select: none;
   flex-shrink: 0;
@@ -358,15 +362,15 @@ defineExpose({
 .base-window__action-icon {
   font-size: var(--chips-font-size-md, 16px);
   line-height: 1;
-  color: var(--chips-color-text-secondary, #666666);
+  color: var(--chips-color-text-secondary, #475569);
 }
 
 .base-window__action:hover {
-  background: var(--chips-color-surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--chips-color-surface-hover, rgba(0, 0, 0, 0.06));
 }
 
 .base-window__action:hover .base-window__action-icon {
-  color: var(--chips-color-text-primary, #1a1a1a);
+  color: var(--chips-color-text, #0f172a);
 }
 
 .base-window__action--close:hover {

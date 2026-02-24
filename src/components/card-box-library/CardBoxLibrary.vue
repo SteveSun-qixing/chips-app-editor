@@ -47,12 +47,6 @@ const hasContent = computed(() => {
   return layoutTypes.value.length > 0;
 });
 
-/** 当前显示的卡片数量 */
-const currentCardCount = computed(() => cardTypes.value.length);
-
-/** 当前显示的布局数量 */
-const currentLayoutCount = computed(() => layoutTypes.value.length);
-
 
 /**
  * 切换标签页
@@ -83,7 +77,6 @@ function handleDragStart(data: DragData, event: DragEvent): void {
       >
         <span class="card-box-library__tab-icon">🃏</span>
         <span class="card-box-library__tab-label">{{ t('card_box.tab_cards') }}</span>
-        <span class="card-box-library__tab-count">{{ currentCardCount }}</span>
       </Button>
       <Button
         class="card-box-library__tab"
@@ -94,7 +87,6 @@ function handleDragStart(data: DragData, event: DragEvent): void {
       >
         <span class="card-box-library__tab-icon">📦</span>
         <span class="card-box-library__tab-label">{{ t('card_box.tab_boxes') }}</span>
-        <span class="card-box-library__tab-count">{{ currentLayoutCount }}</span>
       </Button>
     </div>
 
@@ -185,19 +177,6 @@ function handleDragStart(data: DragData, event: DragEvent): void {
 
 .card-box-library__tab-label {
   font-weight: var(--chips-font-weight-medium, 500);
-}
-
-.card-box-library__tab-count {
-  font-size: var(--chips-font-size-xs, 12px);
-  color: var(--chips-color-text-tertiary, #999);
-  background-color: var(--chips-color-bg-secondary, #f5f5f5);
-  padding: 2px 6px;
-  border-radius: 10px;
-}
-
-.card-box-library__tab--active .card-box-library__tab-count {
-  background-color: var(--chips-color-primary-light, #e6f7ff);
-  color: var(--chips-color-primary, #1890ff);
 }
 
 /* 内容区域 */

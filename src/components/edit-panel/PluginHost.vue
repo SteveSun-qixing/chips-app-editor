@@ -9,24 +9,51 @@
  * - 根据基础卡片类型动态加载对应的编辑器组件
  */
 
-import { ref, computed, watch, onMounted, onUnmounted, shallowRef, nextTick, markRaw, type Component } from 'vue';
+import {
+  ref,
+  computed,
+  watch,
+  onMounted,
+  onUnmounted,
+  shallowRef,
+  nextTick,
+  markRaw,
+  type Component,
+} from 'vue';
 import { Button } from '@chips/components';
 import { useCardStore, useEditorStore, useUIStore } from '@/core/state';
+import type { CardInfo } from '@/core/state/stores/card';
 import DefaultEditor from './DefaultEditor.vue';
 import type { EditorPlugin } from './types';
 import { getEditorRuntime, getLocalPluginVocabulary, getCardPluginPermissions } from '@/services/plugin-service';
 import { t } from '@/services/i18n-service';
 import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
+import { resourceService } from '@/services/resource-service';
 import {
-  buildCardResourceFullPath,
-  releaseCardResourceUrl,
-  resolveCardResourceUrl,
-  type CardResolvedResource,
-} from '@/services/card-resource-resolver';
+  createRequestNonceTracker,
+  generateBridgeNonce,
+  getIframeTargetOrigin,
+  hasRoutePermission,
+  isTrustedBridgeEnvelope,
+  isTrustedIframeOrigin,
+  normalizePermissionToken,
+  resolveIframeOrigin,
+} from './plugin-host/bridge-security';
+import { createIframeMessageChannel } from './plugin-host/message-channel';
+import { createEditorResourceRegistry } from './plugin-host/resource-registry';
+import type {
+  IframeBridgeRequestMessage,
+  IframeConfigUpdateMessage,
+  IframeI18nEnvelope,
+  IframeResizeMessage,
+} from './plugin-host/types';
+import { createIframeVocabularyLoader } from './plugin-host/vocabulary-loader';
 
 // ==================== Props ====================
 interface Props {
+  /** 复合卡片 ID（用于定位非活动窗口的卡片） */
+  cardId?: string;
   /** 基础卡片类型 */
   cardType: string;
   /** 基础卡片 ID */
@@ -86,12 +113,6 @@ const iframePermissions = ref<Set<string>>(new Set());
 /** 当前 iframe 权限是否已加载 */
 const iframePermissionsLoaded = ref(false);
 
-/** 已消费请求 nonce（防重放） */
-const consumedIframeRequestNonces = new Set<string>();
-
-/** 请求 nonce FIFO 队列（用于回收） */
-const consumedIframeRequestNonceQueue: string[] = [];
-
 /** 是否正在加载（内部状态） */
 const isLoadingInternal = ref(true);
 
@@ -119,11 +140,17 @@ const DEBOUNCE_DELAY = 300;
 /** 自动保存间隔（毫秒） */
 const AUTO_SAVE_INTERVAL = 5000;
 
+/** 变更后主动落盘延迟（毫秒） */
+const PERSIST_DELAY = 800;
+
 /** iframe 请求 nonce 缓存上限 */
 const MAX_TRACKED_IFRAME_REQUEST_NONCES = 512;
 
 /** 自动保存定时器 */
 let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 主动落盘定时器 */
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 是否有未保存的更改 */
 const hasUnsavedChanges = ref(false);
@@ -133,12 +160,6 @@ let saveInFlight: Promise<void> | null = null;
 
 /** 是否请求了尾随落盘 */
 let trailingSaveRequested = false;
-
-/** 编辑器资源解析缓存（fullPath -> resolved resource） */
-const resolvedEditorResources = new Map<string, CardResolvedResource>();
-
-let vocabularyLoadSequence = 0;
-let vocabularyVersionSequence = 0;
 let iframePermissionLoadSequence = 0;
 
 /** 富文本编辑器状态 */
@@ -164,153 +185,89 @@ const editorState = ref<{
   isFocused: false,
 });
 
-interface IframeBridgeRequestMessage {
-  type: 'bridge-request';
-  pluginId: string;
-  sessionNonce: string;
-  requestNonce: string;
-  requestId: string;
-  namespace: string;
-  action: string;
-  params?: unknown;
-}
+const resourceRegistry = createEditorResourceRegistry();
+const requestNonceTracker = createRequestNonceTracker(MAX_TRACKED_IFRAME_REQUEST_NONCES);
 
-interface IframeConfigUpdateMessage {
-  type: 'config-update';
-  pluginId: string;
-  sessionNonce: string;
-  config: Record<string, unknown>;
-  persist?: boolean;
-}
-
-interface IframeEditorCancelMessage {
-  type: 'editor-cancel';
-  pluginId: string;
-  sessionNonce: string;
-}
-
-interface IframeResizeMessage {
-  type: 'resize';
-  pluginId: string;
-  sessionNonce: string;
-  width?: number;
-  height?: number;
-}
-
-interface IframeVocabularyPayload {
-  mode: 'full';
-  vocabulary: Record<string, string>;
-}
-
-interface IframeI18nEnvelope {
-  locale: string;
-  version: string;
-  payload: IframeVocabularyPayload;
-}
-
-async function resolveEditorResource(fullPath: string): Promise<string> {
-  const cached = resolvedEditorResources.get(fullPath);
-  if (cached) {
-    return cached.url;
+function getTargetCard(): CardInfo | null {
+  if (props.cardId) {
+    return cardStore.getCard(props.cardId) ?? null;
   }
 
-  const resolved = await resolveCardResourceUrl(fullPath);
-  resolvedEditorResources.set(fullPath, resolved);
-  return resolved.url;
+  return cardStore.activeCard;
 }
 
-async function releaseEditorResource(fullPath: string): Promise<void> {
-  const resolved = resolvedEditorResources.get(fullPath);
-  if (!resolved) return;
-
-  await releaseCardResourceUrl(resolved);
-  resolvedEditorResources.delete(fullPath);
+function resolveTargetCardPath(card: CardInfo | null): string {
+  return resolveCardPath(card?.id, card?.filePath, resourceService.workspaceRoot);
 }
 
-async function releaseEditorResourceByRelativePath(cardPath: string, resourcePath: string): Promise<void> {
-  const fullPath = buildCardResourceFullPath(cardPath, resourcePath);
-  if (resolvedEditorResources.has(fullPath)) {
-    await releaseEditorResource(fullPath);
-    return;
+function toStringRecord(value: unknown): Record<string, string> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
   }
 
-  const normalizedSuffix = `/${resourcePath.replace(/^\/+/, '')}`;
-  for (const path of resolvedEditorResources.keys()) {
-    if (path.endsWith(normalizedSuffix)) {
-      await releaseEditorResource(path);
-      return;
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item !== 'string') {
+      return null;
     }
+    result[key] = item;
   }
+
+  return result;
 }
 
-async function releaseAllEditorResources(): Promise<void> {
-  const resources = Array.from(resolvedEditorResources.values());
-  resolvedEditorResources.clear();
-  await Promise.all(resources.map((resource) => releaseCardResourceUrl(resource)));
-}
-
-function generateBridgeNonce(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `nonce-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function resolveIframeOrigin(url: string): string | null {
-  if (!url) {
+async function fetchHostPluginVocabulary(
+  pluginId: string,
+  locale: string
+): Promise<Record<string, string> | null> {
+  if (typeof window === 'undefined' || !window.chips) {
     return null;
   }
 
   try {
-    return new URL(url, window.location.href).origin;
+    const response = await window.chips.invoke('i18n', 'getPluginVocabulary', {
+      pluginId,
+      locale,
+    });
+
+    const directVocabulary = toStringRecord(response);
+    if (directVocabulary) {
+      return directVocabulary;
+    }
+
+    if (response && typeof response === 'object' && !Array.isArray(response)) {
+      const nestedVocabulary = toStringRecord((response as { vocabulary?: unknown }).vocabulary);
+      if (nestedVocabulary) {
+        return nestedVocabulary;
+      }
+    }
   } catch {
     return null;
   }
+
+  return null;
 }
 
-function normalizePermissionToken(value: string): string {
-  return value.trim().toLowerCase();
-}
+const vocabularyLoader = createIframeVocabularyLoader({
+  getPluginId: () => iframePluginId.value,
+  isEnabled: () => runtimeMode.value === 'iframe' && iframeEditorUrl.value.length > 0,
+  getLocalVocabulary: async (pluginId, locale) => getLocalPluginVocabulary(pluginId, locale),
+  getHostVocabulary: fetchHostPluginVocabulary,
+});
 
-function hasRoutePermission(permissions: ReadonlySet<string>, namespace: string, action: string): boolean {
-  const normalizedNamespace = namespace.trim().toLowerCase();
-  const normalizedAction = action.trim().toLowerCase();
-  const exact = `${normalizedNamespace}.${normalizedAction}`;
-  const wildcard = `${normalizedNamespace}.*`;
-  return (
-    permissions.has(exact)
-    || permissions.has(wildcard)
-    || permissions.has('*')
-  );
-}
-
-function trackConsumedRequestNonce(nonce: string): boolean {
-  if (consumedIframeRequestNonces.has(nonce)) {
-    return false;
-  }
-
-  consumedIframeRequestNonces.add(nonce);
-  consumedIframeRequestNonceQueue.push(nonce);
-
-  if (consumedIframeRequestNonceQueue.length > MAX_TRACKED_IFRAME_REQUEST_NONCES) {
-    const stale = consumedIframeRequestNonceQueue.shift();
-    if (stale) {
-      consumedIframeRequestNonces.delete(stale);
-    }
-  }
-
-  return true;
-}
+const messageChannel = createIframeMessageChannel({
+  getIframeWindow: () => pluginIframeRef.value?.contentWindow ?? null,
+  getTargetOrigin: () => getIframeTargetOrigin(iframeTrustedOrigin.value),
+});
 
 function resetIframeSecurityContext(url: string, pluginId: string): void {
   iframeSessionNonce.value = generateBridgeNonce();
   iframeTrustedOrigin.value = resolveIframeOrigin(url);
   iframePermissions.value = new Set();
   iframePermissionsLoaded.value = false;
-  iframeVocabularyVersion.value = 'init';
-  vocabularyVersionSequence = 0;
-  consumedIframeRequestNonces.clear();
-  consumedIframeRequestNonceQueue.length = 0;
+  vocabularyLoader.reset();
+  iframeVocabularyVersion.value = vocabularyLoader.getCurrentVersion();
+  requestNonceTracker.reset();
 
   if (!pluginId) {
     return;
@@ -322,71 +279,9 @@ function clearIframeSecurityContext(): void {
   iframeTrustedOrigin.value = null;
   iframePermissions.value = new Set();
   iframePermissionsLoaded.value = false;
-  iframeVocabularyVersion.value = 'init';
-  vocabularyVersionSequence = 0;
-  consumedIframeRequestNonces.clear();
-  consumedIframeRequestNonceQueue.length = 0;
-}
-
-function getIframeTargetOrigin(): string {
-  const trustedOrigin = iframeTrustedOrigin.value;
-  if (trustedOrigin && trustedOrigin !== 'null') {
-    return trustedOrigin;
-  }
-  return '*';
-}
-
-function isTrustedIframeOrigin(origin: string): boolean {
-  const expectedOrigin = iframeTrustedOrigin.value;
-  if (!expectedOrigin) {
-    return false;
-  }
-
-  if (expectedOrigin === 'null') {
-    return origin === 'null' || origin.startsWith('chips://') || origin === 'file://';
-  }
-
-  if (expectedOrigin.startsWith('chips://') && origin === 'null') {
-    return true;
-  }
-
-  if (expectedOrigin.startsWith('file://') && origin === 'null') {
-    return true;
-  }
-
-  return origin === expectedOrigin;
-}
-
-function isIframeBridgeEnvelope(message: Record<string, unknown>): message is {
-  pluginId: string;
-  sessionNonce: string;
-} {
-  return typeof message.pluginId === 'string' && typeof message.sessionNonce === 'string';
-}
-
-function isTrustedIframeBridgeEnvelope(message: Record<string, unknown>): boolean {
-  if (!isIframeBridgeEnvelope(message)) {
-    return false;
-  }
-
-  return (
-    message.pluginId === iframePluginId.value
-    && message.sessionNonce === iframeSessionNonce.value
-  );
-}
-
-function buildI18nEnvelope(locale: string, vocabulary: Record<string, string>): IframeI18nEnvelope {
-  const pluginId = iframePluginId.value || 'unknown-plugin';
-  const version = `${pluginId}:${locale}:v${++vocabularyVersionSequence}`;
-  iframeVocabularyVersion.value = version;
-  return {
-    locale,
-    version,
-    payload: {
-      mode: 'full',
-      vocabulary,
-    },
-  };
+  vocabularyLoader.reset();
+  iframeVocabularyVersion.value = vocabularyLoader.getCurrentVersion();
+  requestNonceTracker.reset();
 }
 
 async function ensureIframePermissionsLoaded(pluginId: string): Promise<void> {
@@ -425,8 +320,8 @@ async function ensureIframePermissionsLoaded(pluginId: string): Promise<void> {
  * 策略：优先使用 SDK ResourceManager（含缓存），失败时直接从 dev-file-server 获取。
  */
 const editorOptions = computed(() => {
-  const activeCard = cardStore.activeCard;
-  const cardPath = resolveCardPath(activeCard?.id, activeCard?.filePath);
+  const targetCard = getTargetCard();
+  const cardPath = resolveTargetCardPath(targetCard);
   return {
     toolbar: true,
     autoSave: true,
@@ -438,9 +333,8 @@ const editorOptions = computed(() => {
      * @returns 浏览器可访问的 blob URL
      */
     onResolveResource: async (resourcePath: string): Promise<string> => {
-      const fullPath = buildCardResourceFullPath(cardPath, resourcePath);
       try {
-        return await resolveEditorResource(fullPath);
+        return await resourceRegistry.resolveByRelativePath(cardPath, resourcePath);
       } catch {
         return '';
       }
@@ -451,7 +345,7 @@ const editorOptions = computed(() => {
      * @param resourcePath - 资源在卡片根目录内的相对路径
      */
     onReleaseResolvedResource: async (resourcePath: string): Promise<void> => {
-      await releaseEditorResourceByRelativePath(cardPath, resourcePath);
+      await resourceRegistry.releaseByRelativePath(cardPath, resourcePath);
     },
   };
 });
@@ -463,9 +357,9 @@ const useDefaultEditor = computed(() => {
 
 /** 当前基础卡片信息 */
 const currentBaseCard = computed(() => {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) return null;
-  return activeCard.structure.find(bc => bc.id === props.baseCardId) ?? null;
+  const targetCard = getTargetCard();
+  if (!targetCard) return null;
+  return targetCard.structure.find(bc => bc.id === props.baseCardId) ?? null;
 });
 
 /** 加载状态文本 */
@@ -520,7 +414,6 @@ async function loadPlugin(): Promise<void> {
       iframePluginId.value = '';
       iframeVocabulary.value = {};
       clearIframeSecurityContext();
-      vocabularyLoadSequence += 1;
       emit('plugin-loaded', null);
       loadedTypes.add(props.cardType);
       console.warn('[PluginHost] 加载组件模式编辑器:', props.cardType);
@@ -532,7 +425,6 @@ async function loadPlugin(): Promise<void> {
       iframePluginId.value = runtime.pluginId;
       iframeVocabulary.value = {};
       resetIframeSecurityContext(runtime.iframeUrl, runtime.pluginId);
-      vocabularyLoadSequence += 1;
       void ensureIframePermissionsLoaded(runtime.pluginId);
       emit('plugin-loaded', null);
       loadedTypes.add(props.cardType);
@@ -546,7 +438,6 @@ async function loadPlugin(): Promise<void> {
       iframePluginId.value = '';
       iframeVocabulary.value = {};
       clearIframeSecurityContext();
-      vocabularyLoadSequence += 1;
       emit('plugin-loaded', null);
     }
     
@@ -579,7 +470,7 @@ async function unloadPlugin(): Promise<void> {
     currentPlugin.value = null;
   }
 
-  await releaseAllEditorResources();
+  await resourceRegistry.releaseAll();
   
   // 清空容器
   if (pluginContainerRef.value) {
@@ -594,7 +485,6 @@ async function unloadPlugin(): Promise<void> {
   iframePluginId.value = '';
   iframeVocabulary.value = {};
   clearIframeSecurityContext();
-  vocabularyLoadSequence += 1;
   runtimeMode.value = 'none';
 }
 
@@ -618,6 +508,7 @@ function handleDefaultConfigChange(newConfig: Record<string, unknown>): void {
   localConfig.value = { ...newConfig };
   hasUnsavedChanges.value = true;
   debouncedEmitChange();
+  schedulePersist();
 }
 
 /**
@@ -634,6 +525,7 @@ function handleEditorContentChange(html: string): void {
   editorState.value.wordCount = html.replace(/<[^>]*>/g, '').length;
   hasUnsavedChanges.value = true;
   debouncedEmitChange();
+  schedulePersist();
 }
 
 /**
@@ -683,12 +575,12 @@ async function handleImageCardConfigChange(newConfig: Record<string, unknown>): 
 
   // 如果有待上传的文件，通过 chips:// 协议写入卡片文件夹
   if (pendingFiles && Object.keys(pendingFiles).length > 0) {
-    const activeCard = cardStore.activeCard;
-    if (activeCard) {
-      const cardPath = resolveCardPath(activeCard.id, activeCard.filePath);
+    const targetCard = getTargetCard();
+    if (targetCard) {
+      const cardPath = resolveTargetCardPath(targetCard);
       if (!cardPath) {
         console.error('[PluginHost] Missing card path, skip pending resource write', {
-          cardId: activeCard.id,
+          cardId: targetCard.id,
         });
       } else if (typeof window === 'undefined' || !window.chips) {
         console.error('[PluginHost] Failed to save resources: window.chips is unavailable');
@@ -713,6 +605,7 @@ async function handleImageCardConfigChange(newConfig: Record<string, unknown>): 
   localConfig.value = { ...cleanConfig };
   hasUnsavedChanges.value = true;
   debouncedEmitChange();
+  schedulePersist();
 }
 
 function buildThemeCss(): string {
@@ -720,121 +613,38 @@ function buildThemeCss(): string {
   return cssText ? `:root { ${cssText} }` : '';
 }
 
-function postMessageToIframe(message: Record<string, unknown>): void {
-  const iframeWindow = pluginIframeRef.value?.contentWindow;
-  if (!iframeWindow) {
-    return;
-  }
-  iframeWindow.postMessage(message, getIframeTargetOrigin());
-}
-
-function toStringRecord(value: unknown): Record<string, string> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof item !== 'string') {
-      return null;
-    }
-    result[key] = item;
-  }
-  return result;
-}
-
-async function fetchHostPluginVocabulary(
-  pluginId: string,
-  locale: string
-): Promise<Record<string, string> | null> {
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
-  }
-
-  try {
-    const response = await window.chips.invoke('i18n', 'getPluginVocabulary', {
-      pluginId,
-      locale,
+function postMessageToIframe(message: Record<string, unknown>): boolean {
+  const posted = messageChannel.post(message);
+  if (!posted) {
+    console.error('[PluginHost] Failed to postMessage to iframe', {
+      type: message.type,
     });
-
-    const directVocabulary = toStringRecord(response);
-    if (directVocabulary) {
-      return directVocabulary;
-    }
-
-    if (response && typeof response === 'object' && !Array.isArray(response)) {
-      const nestedVocabulary = toStringRecord((response as { vocabulary?: unknown }).vocabulary);
-      if (nestedVocabulary) {
-        return nestedVocabulary;
-      }
-    }
-  } catch {
-    return null;
   }
-
-  return null;
+  return posted;
 }
 
 async function loadIframeVocabulary(locale: string): Promise<Record<string, string>> {
-  if (!useIframeEditor.value || !iframePluginId.value) {
-    iframeVocabulary.value = {};
-    iframeVocabularyVersion.value = 'init';
-    return {};
-  }
-
-  const currentSequence = ++vocabularyLoadSequence;
-  const pluginId = iframePluginId.value;
-  const localVocabulary = await getLocalPluginVocabulary(pluginId, locale);
-  const hostVocabulary = await fetchHostPluginVocabulary(pluginId, locale);
-  const resolvedVocabulary: Record<string, string> = {};
-  const vocabularyKeys = new Set<string>([
-    ...Object.keys(localVocabulary ?? {}),
-    ...Object.keys(hostVocabulary ?? {}),
-  ]);
-
-  for (const key of vocabularyKeys) {
-    const hostValue = hostVocabulary?.[key];
-    const localValue = localVocabulary?.[key];
-
-    if (typeof hostValue === 'string' && hostValue.trim().length > 0) {
-      if (hostValue === key) {
-        if (
-          typeof localValue === 'string'
-          && localValue.trim().length > 0
-          && localValue !== key
-        ) {
-          resolvedVocabulary[key] = localValue;
-        }
-        continue;
-      }
-
-      resolvedVocabulary[key] = hostValue;
-      continue;
-    }
-
-    if (typeof localValue === 'string' && localValue.trim().length > 0) {
-      resolvedVocabulary[key] = localValue;
-    }
-  }
-
-  if (currentSequence !== vocabularyLoadSequence) {
-    return iframeVocabulary.value;
-  }
-
+  const resolvedVocabulary = await vocabularyLoader.load(locale);
   iframeVocabulary.value = resolvedVocabulary;
-  buildI18nEnvelope(locale, resolvedVocabulary);
   return resolvedVocabulary;
 }
 
-function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): void {
+function buildI18nEnvelope(locale: string, vocabulary: Record<string, string>): IframeI18nEnvelope {
+  const envelope = vocabularyLoader.buildEnvelope(locale, vocabulary);
+  iframeVocabularyVersion.value = envelope.version;
+  return envelope;
+}
+
+function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): boolean {
   if (!useIframeEditor.value) {
-    return;
+    return false;
   }
 
-  const activeCard = cardStore.activeCard;
+  const targetCard = getTargetCard();
+  const cardPath = resolveTargetCardPath(targetCard);
   const locale = editorStore.locale ?? 'zh-CN';
   const i18n = buildI18nEnvelope(locale, vocabulary);
-  postMessageToIframe({
+  return postMessageToIframe({
     type: 'init',
     payload: {
       config: { ...localConfig.value },
@@ -849,8 +659,8 @@ function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.va
         },
       },
       resources: {
-        cardId: activeCard?.id ?? '',
-        cardPath: activeCard?.filePath ?? '',
+        cardId: targetCard?.id ?? '',
+        cardPath,
       },
       locale: i18n.locale,
       vocabularyVersion: i18n.version,
@@ -982,7 +792,7 @@ async function handleIframeBridgeRequest(message: IframeBridgeRequestMessage): P
     return;
   }
 
-  if (!trackConsumedRequestNonce(message.requestNonce)) {
+  if (!requestNonceTracker.track(message.requestNonce)) {
     postIframeBridgeResponse(message.requestId, {
       requestNonce: message.requestNonce,
       error: {
@@ -1077,6 +887,8 @@ async function handleIframeConfigUpdate(
 
   if (persist) {
     await saveConfig();
+  } else {
+    schedulePersist();
   }
 }
 
@@ -1103,7 +915,7 @@ function handleIframeMessage(event: MessageEvent): void {
     return;
   }
 
-  if (!isTrustedIframeOrigin(event.origin)) {
+  if (!isTrustedIframeOrigin(event.origin, iframeTrustedOrigin.value)) {
     return;
   }
 
@@ -1116,7 +928,7 @@ function handleIframeMessage(event: MessageEvent): void {
     return;
   }
 
-  if (!isTrustedIframeBridgeEnvelope(record)) {
+  if (!isTrustedBridgeEnvelope(record, iframePluginId.value, iframeSessionNonce.value)) {
     return;
   }
 
@@ -1146,10 +958,20 @@ function handleIframeMessage(event: MessageEvent): void {
 }
 
 async function handleIframeLoad(): Promise<void> {
-  const locale = editorStore.locale ?? 'zh-CN';
-  const vocabulary = await loadIframeVocabulary(locale);
-  sendIframeInit(vocabulary);
-  postIframeLanguageChange(locale, vocabulary);
+  try {
+    const locale = editorStore.locale ?? 'zh-CN';
+    const vocabulary = await loadIframeVocabulary(locale);
+    const initSent = sendIframeInit(vocabulary);
+    if (!initSent) {
+      throw new Error('Failed to send iframe init message');
+    }
+    postIframeLanguageChange(locale, vocabulary);
+  } catch (error) {
+    const resolvedError = error instanceof Error ? error : new Error(String(error));
+    loadError.value = resolvedError;
+    emit('plugin-error', resolvedError);
+    console.error('[PluginHost] Failed to initialize iframe editor', resolvedError);
+  }
 }
 
 /**
@@ -1164,6 +986,17 @@ function debouncedEmitChange(): void {
     debounceTimer = null;
     emitConfigChange();
   }, DEBOUNCE_DELAY);
+}
+
+function schedulePersist(): void {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+  }
+
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void saveConfig();
+  }, PERSIST_DELAY);
 }
 
 /**
@@ -1184,18 +1017,30 @@ function flushPendingConfigEmit(): void {
   emitConfigChange();
 }
 
+function clearPersistTimer(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = null;
+  }
+
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+}
+
 /**
  * 更新 Store 中的配置
  */
 function updateStoreConfig(): void {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) return;
+  const targetCard = getTargetCard();
+  if (!targetCard) return;
   
-  const baseCardIndex = activeCard.structure.findIndex(bc => bc.id === props.baseCardId);
+  const baseCardIndex = targetCard.structure.findIndex(bc => bc.id === props.baseCardId);
   if (baseCardIndex === -1) return;
   
   // 创建新的 structure 数组
-  const newStructure = [...activeCard.structure];
+  const newStructure = [...targetCard.structure];
   const currentBaseCard = newStructure[baseCardIndex];
   if (!currentBaseCard) {
     return;
@@ -1206,22 +1051,27 @@ function updateStoreConfig(): void {
   };
   
   // 更新 store
-  cardStore.updateCardStructure(activeCard.id, newStructure);
+  cardStore.updateCardStructure(targetCard.id, newStructure);
   editorStore.markUnsaved();
 }
 
 async function persistCardConfig(): Promise<void> {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) {
+  const targetCard = getTargetCard();
+  if (!targetCard) {
     return;
   }
 
-  const cardPath = requireCardPath(activeCard.id, activeCard.filePath, 'PluginHost.persistCardConfig');
-  await saveCardToWorkspace(activeCard, cardPath);
-  if (!activeCard.filePath) {
-    cardStore.updateFilePath(activeCard.id, cardPath);
+  const cardPath = requireCardPath(
+    targetCard.id,
+    targetCard.filePath,
+    'PluginHost.persistCardConfig',
+    resourceService.workspaceRoot,
+  );
+  const persistedPath = await saveCardToWorkspace(targetCard, cardPath);
+  if (!targetCard.filePath) {
+    cardStore.updateFilePath(targetCard.id, persistedPath);
   }
-  cardStore.markCardSaved(activeCard.id);
+  cardStore.markCardSaved(targetCard.id);
   if (!cardStore.hasModifiedCards) {
     editorStore.markSaved();
   }
@@ -1259,10 +1109,10 @@ async function saveConfig(): Promise<void> {
     hasUnsavedChanges.value = false;
   } catch (error) {
     hasUnsavedChanges.value = true;
-    const activeCard = cardStore.activeCard;
-    const cardPath = resolveCardPath(activeCard?.id, activeCard?.filePath);
+    const targetCard = getTargetCard();
+    const cardPath = resolveTargetCardPath(targetCard);
     console.error('[PluginHost] Failed to persist card config', {
-      cardId: activeCard?.id ?? '',
+      cardId: targetCard?.id ?? '',
       baseCardId: props.baseCardId,
       cardPath,
       error,
@@ -1348,9 +1198,10 @@ onMounted(async () => {
 
 onUnmounted(async () => {
   window.removeEventListener('message', handleIframeMessage);
-  // 清理防抖定时器
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
+  clearPersistTimer();
+
+  if (hasUnsavedChanges.value) {
+    await saveConfig();
   }
   
   // 停止自动保存

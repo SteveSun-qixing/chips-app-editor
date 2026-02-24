@@ -8,12 +8,11 @@
  */
 
 import { ref, computed, watch } from 'vue';
-import type { Card as SDKCard } from '@chips/sdk';
 import type { CardInfo } from '@/core/state';
-import { getEditorSdk } from '@/services/sdk-service';
+import { resolveCardPath as resolveWorkspaceCardPath } from '@/services/card-path-service';
+import { saveCardToWorkspace } from '@/services/card-persistence-service';
 import { resourceService } from '@/services/resource-service';
 import { t } from '@/services/i18n-service';
-import { stringifyBaseCardContentYaml } from '@/core/base-card-content-loader';
 
 interface Props {
   /** 卡片 ID */
@@ -41,7 +40,6 @@ function toRootRelative(path: string): string {
   return path;
 }
 
-const workspaceRootRelative = toRootRelative(resourceService.workspaceRoot);
 const externalRootRelative = toRootRelative(resourceService.externalRoot);
 
 /**
@@ -117,56 +115,6 @@ async function generateUniqueDirectoryName(
   return { directoryName: fallbackName, fullPath: `${externalRootRelative}/${fallbackName}` };
 }
 
-function resolveCardPath(cardId: string, path?: string): string {
-  if (path && path.trim()) {
-    return toRootRelative(path);
-  }
-  return `${workspaceRootRelative}/${cardId}.card`;
-}
-
-/**
- * 保存卡片到工作区
- */
-async function saveCardToWorkspace(cardId: string, cardPath: string, card: CardInfo): Promise<void> {
-  const sdk = await getEditorSdk();
-  const timestamp = new Date().toISOString();
-  const cardData: SDKCard = {
-    id: cardId,
-    metadata: {
-      ...card.metadata,
-      card_id: cardId,
-      modified_at: timestamp,
-    },
-    structure: {
-      structure: card.structure.map((baseCard) => ({ id: baseCard.id, type: baseCard.type })),
-      manifest: {
-        card_count: card.structure.length,
-        resource_count: 0,
-        resources: [],
-      },
-    },
-    resources: new Map<string, Blob | ArrayBuffer>(),
-  };
-
-  // 1. 保存卡片元数据和结构
-  await sdk.card.save(cardPath, cardData, { overwrite: true });
-
-  // 2. 写入每个基础卡片的内容文件 content/{id}.yaml
-  //    这些内容存储在 store 的 BaseCardInfo.config 中，
-  //    对应磁盘上的 content/{id}.yaml 文件。
-  //    转换插件（CardtoHTMLPlugin）解析卡片时会读取这些文件来获取基础卡片数据。
-  const contentDir = `${cardPath}/content`;
-  let savedContentCount = 0;
-  for (const baseCard of card.structure) {
-    const contentYaml = stringifyBaseCardContentYaml(baseCard.type, baseCard.config);
-    const contentFilePath = `${contentDir}/${baseCard.id}.yaml`;
-    await resourceService.writeText(contentFilePath, contentYaml);
-    savedContentCount += 1;
-  }
-
-  console.warn(`[SaveCard] 卡片已保存到工作区: ${cardPath}，写入 ${savedContentCount} 个基础卡片内容文件`);
-}
-
 // 导出格式配置
 const exportFormats = computed(() => [
   {
@@ -215,13 +163,13 @@ async function handleExport(format: 'card' | 'html' | 'pdf' | 'image'): Promise<
 
     const cardName = props.cardInfo.metadata.name || t('card_settings.untitled_card');
     const cardId = props.cardId;
-    const cardPath = resolveCardPath(cardId, props.cardInfo.filePath);
+    const cardPath = resolveWorkspaceCardPath(cardId, props.cardInfo.filePath, resourceService.workspaceRoot);
 
     // 所有格式导出前，先将卡片（含基础卡片内容）保存到工作区
     // 确保磁盘上的文件与编辑器内存状态一致
     exportMessage.value = t('card_settings.export_save_card');
     exportProgress.value = 15;
-    await saveCardToWorkspace(cardId, cardPath, props.cardInfo);
+    await saveCardToWorkspace(props.cardInfo, cardPath);
 
     if (format === 'card') {
       exportMessage.value = t('card_settings.export_create_package');

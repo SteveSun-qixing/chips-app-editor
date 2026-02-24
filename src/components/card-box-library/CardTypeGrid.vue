@@ -73,19 +73,21 @@ function handleDragStart(type: CardTypeDefinition, event: DragEvent): void {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--chips-spacing-xs, 4px);
-  padding: var(--chips-spacing-sm, 8px);
+  gap: 6px;
+  padding: 10px 6px;
   border-radius: var(--chips-border-radius-base, 8px);
-  background-color: var(--chips-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--chips-color-border-light, #e5e7eb);
+  background-color: var(--chips-color-surface, #ffffff);
   cursor: grab;
   transition: all 0.2s ease;
   user-select: none;
 }
 
 .card-type-grid__item:hover {
-  background-color: var(--chips-color-bg-hover, #e8e8e8);
+  background-color: var(--chips-color-primary-subtle, rgba(37, 99, 235, 0.06));
+  border-color: var(--chips-color-primary-light, rgba(59, 130, 246, 0.35));
   transform: translateY(-1px);
-  box-shadow: var(--chips-shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.1));
+  box-shadow: var(--chips-shadow-sm, 0 2px 6px rgba(0, 0, 0, 0.08));
 }
 
 .card-type-grid__item:active {
@@ -94,16 +96,22 @@ function handleDragStart(type: CardTypeDefinition, event: DragEvent): void {
 }
 
 .card-type-grid__item-icon {
-  font-size: var(--chips-font-size-xl, 24px);
+  font-size: 28px;
+  line-height: 1;
 }
 
 .card-type-grid__item-name {
   font-size: var(--chips-font-size-xs, 12px);
-  color: var(--chips-color-text-secondary, #666);
+  font-weight: var(--chips-font-weight-medium, 500);
+  color: var(--chips-color-text-secondary, #475569);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+}
+
+.card-type-grid__item:hover .card-type-grid__item-name {
+  color: var(--chips-color-primary, #2563eb);
 }
 </style>

@@ -10,6 +10,7 @@ import JSZip from 'jszip';
 import { resourceServiceMock, resetResourceServiceMock } from './helpers/resource-service-mock';
 import { installMockBridge, resetMockBridge } from './helpers/mock-bridge';
 import { initializeEditorI18n } from '@/services/i18n-service';
+import { setWorkspacePaths } from '@/services/resource-service';
 
 type ProgressCallback = (progress: { percent: number }) => void;
 
@@ -150,7 +151,9 @@ const {
 // 全局 mock 设置
 
 // Mock @chips/sdk
-vi.mock('@chips/sdk', () => {
+vi.mock('@chips/sdk', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@chips/sdk');
+
   class ChipsSDK {
     version = '1.0.0';
     connector: MockCoreConnector;
@@ -332,6 +335,7 @@ vi.mock('@chips/sdk', () => {
   }
 
   return {
+    ...actual,
     ChipsSDK,
     createSDK: vi.fn().mockResolvedValue(new ChipsSDK()),
     CoreConnector: MockCoreConnector,
@@ -666,6 +670,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetResourceServiceMock();
   resetMockBridge();
+  setWorkspacePaths(
+    '/ProductFinishedProductTestingSpace/TestWorkspace',
+    '/ProductFinishedProductTestingSpace/ExternalEnvironment'
+  );
 });
 
 afterEach(() => {

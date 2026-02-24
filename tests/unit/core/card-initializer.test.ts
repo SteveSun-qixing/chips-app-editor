@@ -5,6 +5,34 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const { mockConnectorRequest, mockTranslate } = vi.hoisted(() => ({
+  mockConnectorRequest: vi.fn(),
+  mockTranslate: vi.fn(
+    (key: string, params?: Record<string, string | number>): string => {
+      if (!params) {
+        return `translated:${key}`;
+      }
+      return Object.entries(params).reduce(
+        (message, [paramKey, value]) =>
+          message.replace(`{${paramKey}}`, String(value)),
+        `translated:${key}`
+      );
+    }
+  ),
+}));
+
+vi.mock('@/services/sdk-service', () => ({
+  getEditorConnector: vi.fn(async () => ({
+    request: mockConnectorRequest,
+  })),
+}));
+
+vi.mock('@/services/i18n-service', () => ({
+  t: (key: string, params?: Record<string, string | number>) =>
+    mockTranslate(key, params),
+}));
+
 import {
   createCardInitializer,
   useCardInitializer,
@@ -117,6 +145,39 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
   return result;
 }
 
+function setupConnectorRequestMock(): void {
+  mockConnectorRequest.mockClear();
+  mockConnectorRequest.mockImplementation(
+    async (request: {
+      service: string;
+      method: string;
+      payload?: Record<string, unknown>;
+    }) => {
+      if (request.service === 'serializer' && request.method === 'stringifyYaml') {
+        return {
+          success: true,
+          data: {
+            text: JSON.stringify(request.payload?.data ?? {}),
+          },
+        };
+      }
+
+      if (request.service === 'file' && request.method === 'exists') {
+        return {
+          success: true,
+          data: {
+            exists: false,
+          },
+        };
+      }
+
+      return {
+        success: true,
+      };
+    }
+  );
+}
+
 // ========== 测试套件 ==========
 
 describe('CardInitializer（卡片初始化器）', () => {
@@ -129,6 +190,9 @@ describe('CardInitializer（卡片初始化器）', () => {
   };
 
   beforeEach(() => {
+    setupConnectorRequestMock();
+    mockTranslate.mockClear();
+
     // 重置单例
     resetCardInitializer();
 
@@ -389,6 +453,53 @@ describe('CardInitializer（卡片初始化器）', () => {
 
         expect(result.success).toBe(false);
         expect(result.errorCode).toBe('VAL-1002');
+      });
+    });
+
+    describe('基础服务调用', () => {
+      it('应该通过 serializer.stringifyYaml 序列化 metadata 和 structure', async () => {
+        const result = await initializer.createCard('a1B2c3D4e5', '测试卡片');
+
+        expect(result.success).toBe(true);
+        const serializeCalls = mockConnectorRequest.mock.calls.filter(
+          ([request]) =>
+            request &&
+            request.service === 'serializer' &&
+            request.method === 'stringifyYaml'
+        );
+        expect(serializeCalls.length).toBe(2);
+      });
+
+      it('带初始基础卡片时应该额外序列化 content yaml', async () => {
+        const result = await initializer.createCard('a1B2c3D4e5', '测试卡片', {
+          id: 'bC3dE4fG5h',
+          type: 'VideoCard',
+          data: { autoplay: true },
+        });
+
+        expect(result.success).toBe(true);
+        const serializeCalls = mockConnectorRequest.mock.calls.filter(
+          ([request]) =>
+            request &&
+            request.service === 'serializer' &&
+            request.method === 'stringifyYaml'
+        );
+        expect(serializeCalls.length).toBe(3);
+      });
+    });
+
+    describe('i18n 调用', () => {
+      it('参数校验失败时应走 i18n 翻译函数', async () => {
+        const result = await initializer.createCard('invalid', '测试卡片');
+
+        expect(result.success).toBe(false);
+        expect(mockTranslate).toHaveBeenCalledWith(
+          'editor.card_initializer.error.invalid_card_id',
+          undefined
+        );
+        expect(result.error).toBe(
+          'translated:editor.card_initializer.error.invalid_card_id'
+        );
       });
     });
 
@@ -848,6 +959,11 @@ describe('CardInitializer（卡片初始化器）', () => {
 // ========== 额外的工具函数测试 ==========
 
 describe('辅助功能测试', () => {
+  beforeEach(() => {
+    setupConnectorRequestMock();
+    mockTranslate.mockClear();
+  });
+
   describe('ID 生成器的随机性', () => {
     it('应该使用完整的 62 字符集', () => {
       const initializer = createCardInitializer({ workspaceRoot: '/test' });

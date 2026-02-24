@@ -10,7 +10,6 @@ import { useCardStore } from '@/core/state';
 import PluginHost from './PluginHost.vue';
 import type { EditPanelPosition } from './types';
 import { t } from '@/services/i18n-service';
-import { resolveBaseCardRuntimeType } from '@/components/window/base-card-runtime-type';
 
 // ==================== Props ====================
 interface Props {
@@ -57,18 +56,6 @@ const selectedBaseCard = computed(() => {
     return null;
   }
   return activeCard.structure.find(bc => bc.id === cardStore.selectedBaseCardId) ?? null;
-});
-
-const selectedBaseCardRuntimeType = computed(() => {
-  const baseCard = selectedBaseCard.value;
-  if (!baseCard) {
-    return '';
-  }
-
-  return resolveBaseCardRuntimeType({
-    type: baseCard.type,
-    config: baseCard.config,
-  });
 });
 
 /** 面板样式 */
@@ -194,7 +181,7 @@ defineExpose({
         >
           <PluginHost
             :card-id="cardStore.activeCardId ?? undefined"
-            :card-type="selectedBaseCardRuntimeType"
+            :card-type="selectedBaseCard.type"
             :base-card-id="selectedBaseCard.id"
             :config="selectedBaseCard.config ?? {}"
             @config-change="handleConfigChange"

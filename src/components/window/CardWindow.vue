@@ -61,10 +61,7 @@ const workspaceService = useWorkspaceService();
 const previewContainer = ref<HTMLElement | null>(null);
 const previewRenderError = ref<string | null>(null);
 
-const previewFetcher = new RendererFetcher({
-  enableCache: true,
-  allowBuiltinRendererFallback: false,
-});
+const previewFetcher = new RendererFetcher({ enableCache: true });
 let previewDestroy: (() => void) | null = null;
 let previewRenderVersion = 0;
 let scheduledPreviewRenderVersion = 0;
@@ -502,7 +499,6 @@ function buildParsedCardData(baseCards: ParsedBaseCardConfig[]): ParsedCardData 
       tags: Array.isArray(metadata?.tags)
         ? metadata.tags.filter((tag): tag is string => typeof tag === 'string')
         : undefined,
-      sourcePath: getCardPath() ?? undefined,
       chipsStandardsVersion: String(metadata?.chip_standards_version ?? '1.0.0'),
     },
     structure: {

@@ -8,12 +8,7 @@
  */
 
 import type { Component } from 'vue';
-import {
-  fetchPluginEntryText,
-  resolvePluginEntryUrl,
-  type ChipsSDK,
-  type PluginRegistration,
-} from '@chips/sdk';
+import type { ChipsSDK, PluginRegistration } from '@chips/sdk';
 import { parse as parseYaml } from 'yaml';
 import { getEditorSdk } from './sdk-service';
 
@@ -22,27 +17,6 @@ interface CardPluginInfo {
   pluginId: string;
   rendererPath: string;
   editorPath: string;
-  rendererUrl?: string;
-  editorUrl?: string;
-  permissions?: string[];
-}
-
-interface CardPluginRuntimeContext {
-  pluginId: string;
-  cardType: string;
-  rendererPath: string;
-  rendererUrl: string;
-  editorPath: string;
-  editorUrl: string;
-  permissions: string[];
-  locale: string;
-  vocabularyVersion: number;
-  vocabulary: Record<string, string>;
-  decisionSource?: 'user-selected' | 'default' | 'fallback';
-}
-
-interface PluginBridgeWithRuntimeContext {
-  getCardRuntimeContext?: (cardType: string, locale?: string) => Promise<CardPluginRuntimeContext | null>;
 }
 
 export interface EditorRuntime {
@@ -76,7 +50,6 @@ const runtimeCache = new Map<string, EditorRuntime>();
 
 /** 卡片类型到插件信息的缓存 */
 const cardPluginCache = new Map<string, CardPluginInfo | null>();
-const cardRuntimeContextCache = new Map<string, CardPluginRuntimeContext | null>();
 
 // ==================== 本地插件回退 ====================
 /**
@@ -137,17 +110,12 @@ function getLocalPluginMap(): Map<string, LocalPluginEntry> {
   return localPluginMap;
 }
 
-function getLocalPluginEntry(cardType: string): LocalPluginEntry | null {
-  const map = getLocalPluginMap();
-  const normalizedCardType = pluginIdToCardType.get(cardType) ?? cardType;
-  return map.get(cardType) ?? map.get(normalizedCardType) ?? null;
-}
-
 /**
  * 本地回退：通过构建时扫描的清单获取编辑器入口 URL
  */
 function getLocalEditorUrl(cardType: string): string | null {
-  const entry = getLocalPluginEntry(cardType);
+  const map = getLocalPluginMap();
+  const entry = map.get(cardType);
   if (!entry) return null;
 
   // 将 manifestDir + editorPath 拼接为相对于当前模块的路径，
@@ -184,20 +152,29 @@ function resolvePluginCardType(plugin: {
 }
 
 function normalizeCardType(cardType: string): string {
-  const resolved = pluginIdToCardType.get(cardType);
-  if (resolved) {
-    return resolved;
-  }
-
-  getLocalPluginMap();
   return pluginIdToCardType.get(cardType) ?? cardType;
 }
 
-function resolveBridgePlugin() {
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
+function isAbsoluteUrl(value: string): boolean {
+  return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+}
+
+function isAbsoluteFilePath(value: string): boolean {
+  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function toFileUrl(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+
+  if (/^[a-zA-Z]:\//.test(normalized)) {
+    return `file:///${encodeURI(normalized)}`;
   }
-  return window.chips.plugin;
+
+  if (normalized.startsWith('/')) {
+    return `file://${encodeURI(normalized)}`;
+  }
+
+  return `file:///${encodeURI(normalized)}`;
 }
 
 function isHtmlEntryPath(entryPath: string): boolean {
@@ -205,15 +182,27 @@ function isHtmlEntryPath(entryPath: string): boolean {
 }
 
 async function resolvePluginEntryPath(pluginId: string, entryPath: string): Promise<string | null> {
-  return resolvePluginEntryUrl(pluginId, entryPath, {
-    pluginResolver: resolveBridgePlugin(),
-    onResolveError: (error) => {
-      console.warn(
-        `[PluginService] Failed to resolve plugin file URL for "${pluginId}" and "${entryPath}":`,
-        error
-      );
-    },
-  });
+  if (isAbsoluteUrl(entryPath)) {
+    return entryPath;
+  }
+
+  if (isAbsoluteFilePath(entryPath)) {
+    return toFileUrl(entryPath);
+  }
+
+  if (typeof window === 'undefined' || !window.chips) {
+    return null;
+  }
+
+  try {
+    return await window.chips.plugin.resolveFileUrl(pluginId, entryPath);
+  } catch (error) {
+    console.warn(
+      `[PluginService] Failed to resolve plugin file URL for "${pluginId}" and "${entryPath}":`,
+      error
+    );
+    return null;
+  }
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
@@ -227,159 +216,21 @@ function normalizePermission(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function buildRuntimeContextCacheKey(cardType: string, locale?: string): string {
-  const localeKey = locale ? locale.trim().toLowerCase() : '';
-  return `${cardType}::${localeKey}`;
-}
-
-function normalizeVocabulary(value: unknown): Record<string, string> | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const vocabulary: Record<string, string> = {};
-  for (const [key, item] of Object.entries(record)) {
-    if (typeof item === 'string') {
-      vocabulary[key] = item;
-    }
-  }
-
-  return vocabulary;
-}
-
-function normalizeRuntimeContext(value: unknown): CardPluginRuntimeContext | null {
-  const record = toRecord(value);
-  if (!record) {
-    return null;
-  }
-
-  const pluginId = typeof record.pluginId === 'string' ? record.pluginId.trim() : '';
-  const cardType = typeof record.cardType === 'string' ? record.cardType.trim() : '';
-  const rendererPath = typeof record.rendererPath === 'string' ? record.rendererPath.trim() : '';
-  const rendererUrl = typeof record.rendererUrl === 'string' ? record.rendererUrl.trim() : '';
-  const editorPath = typeof record.editorPath === 'string' ? record.editorPath.trim() : '';
-  const editorUrl = typeof record.editorUrl === 'string' ? record.editorUrl.trim() : '';
-  const locale = typeof record.locale === 'string' && record.locale.trim().length > 0
-    ? record.locale.trim()
-    : 'zh-CN';
-  const vocabularyVersion = typeof record.vocabularyVersion === 'number' && Number.isFinite(record.vocabularyVersion)
-    ? Math.max(0, Math.trunc(record.vocabularyVersion))
-    : 0;
-
-  if (!pluginId || !cardType || !rendererPath || !rendererUrl || !editorPath || !editorUrl) {
-    return null;
-  }
-
-  const permissions = Array.isArray(record.permissions)
-    ? Array.from(
-      new Set(
-        record.permissions
-          .filter((item): item is string => typeof item === 'string')
-          .map((item) => normalizePermission(item))
-          .filter((item) => item.length > 0)
-      )
-    )
-    : [];
-
-  const vocabulary = normalizeVocabulary(record.vocabulary) ?? {};
-  const decisionSource = record.decisionSource;
-
-  return {
-    pluginId,
-    cardType,
-    rendererPath,
-    rendererUrl,
-    editorPath,
-    editorUrl,
-    permissions,
-    locale,
-    vocabularyVersion,
-    vocabulary,
-    ...(decisionSource === 'user-selected' || decisionSource === 'default' || decisionSource === 'fallback'
-      ? { decisionSource }
-      : {}),
-  };
-}
-
-function cacheRuntimeContext(context: CardPluginRuntimeContext): void {
-  pluginIdToCardType.set(context.pluginId, context.cardType);
-  cardPluginCache.set(context.cardType, {
-    pluginId: context.pluginId,
-    rendererPath: context.rendererPath,
-    rendererUrl: context.rendererUrl,
-    editorPath: context.editorPath,
-    editorUrl: context.editorUrl,
-    permissions: context.permissions,
-  });
-  if (context.permissions.length > 0) {
-    pluginPermissionCache.set(context.pluginId, new Set(context.permissions));
-  }
-
-  if (Object.keys(context.vocabulary).length > 0) {
-    let localeMap = pluginVocabularyCache.get(context.pluginId);
-    if (!localeMap) {
-      localeMap = new Map<string, Record<string, string>>();
-      pluginVocabularyCache.set(context.pluginId, localeMap);
-    }
-    localeMap.set(context.locale, context.vocabulary);
-  }
-}
-
-async function getCardRuntimeContext(
-  cardType: string,
-  locale?: string,
-  options?: { force?: boolean }
-): Promise<CardPluginRuntimeContext | null> {
-  const force = options?.force === true;
-  const cacheKey = buildRuntimeContextCacheKey(cardType, locale);
-
-  if (force) {
-    cardRuntimeContextCache.delete(cacheKey);
-  }
-
-  if (!force && cardRuntimeContextCache.has(cacheKey)) {
-    return cardRuntimeContextCache.get(cacheKey) ?? null;
-  }
-
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
-  }
-
-  const pluginBridge = window.chips.plugin as unknown as PluginBridgeWithRuntimeContext;
-  if (typeof pluginBridge.getCardRuntimeContext !== 'function') {
-    cardRuntimeContextCache.set(cacheKey, null);
-    return null;
-  }
-
-  try {
-    const runtimeContext = normalizeRuntimeContext(
-      await pluginBridge.getCardRuntimeContext(
-        cardType,
-        typeof locale === 'string' && locale.trim().length > 0 ? locale : undefined
-      )
-    );
-    cardRuntimeContextCache.set(cacheKey, runtimeContext);
-
-    if (runtimeContext) {
-      cacheRuntimeContext(runtimeContext);
-    }
-
-    return runtimeContext;
-  } catch (error) {
-    console.warn(`[PluginService] Failed to load runtime context for "${cardType}":`, error);
-    cardRuntimeContextCache.set(cacheKey, null);
-    return null;
-  }
-}
-
 async function fetchPluginTextFile(pluginId: string, relativePath: string): Promise<string | null> {
   const url = await resolvePluginEntryPath(pluginId, relativePath);
   if (!url) {
     return null;
   }
 
-  return fetchPluginEntryText(url);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return null;
+    }
+    return await response.text();
+  } catch {
+    return null;
+  }
 }
 
 async function loadPluginManifest(pluginId: string): Promise<Record<string, unknown> | null> {
@@ -533,15 +384,6 @@ async function getCardPluginInfo(cardType: string, options?: { force?: boolean }
     return cardPluginCache.get(cardType) ?? null;
   }
 
-  const runtimeContext = await getCardRuntimeContext(cardType, undefined, { force });
-  if (runtimeContext) {
-    const info = cardPluginCache.get(runtimeContext.cardType) ?? null;
-    if (info) {
-      cardPluginCache.set(cardType, info);
-      return info;
-    }
-  }
-
   try {
     if (typeof window === 'undefined' || !window.chips) {
       return null;
@@ -657,42 +499,24 @@ export async function getEditorRuntime(cardType: string): Promise<EditorRuntime 
     pluginInfo = await getCardPluginInfo(normalizedCardType, { force: true });
   }
 
-  const localEditorUrl = getLocalEditorUrl(normalizedCardType) ?? getLocalEditorUrl(cardType);
-  const localPluginId =
-    getLocalPluginEntry(normalizedCardType)?.pluginId
-    ?? getLocalPluginEntry(cardType)?.pluginId;
-
   if (!pluginInfo || !pluginInfo.editorPath) {
-    if (localEditorUrl) {
-      const runtime: EditorRuntime = {
-        mode: 'iframe',
-        pluginId: localPluginId ?? normalizedCardType,
-        iframeUrl: localEditorUrl,
-      };
-      runtimeCache.set(normalizedCardType, runtime);
-      runtimeCache.set(cardType, runtime);
-      return runtime;
-    }
-
     console.warn(`[PluginService] Card plugin info not found for cardType "${normalizedCardType}"`);
     return null;
   }
 
-  const resolvedEditorPath = pluginInfo.editorUrl
-    ?? await resolvePluginEntryPath(pluginInfo.pluginId, pluginInfo.editorPath);
-  const runtimeEntryPath = resolvedEditorPath ?? localEditorUrl;
-  if (!runtimeEntryPath) {
+  const resolvedEditorPath = await resolvePluginEntryPath(pluginInfo.pluginId, pluginInfo.editorPath);
+  if (!resolvedEditorPath) {
     console.warn(
       `[PluginService] Failed to resolve editor path for "${normalizedCardType}" from "${pluginInfo.editorPath}"`
     );
     return null;
   }
 
-  if (isHtmlEntryPath(runtimeEntryPath)) {
+  if (isHtmlEntryPath(resolvedEditorPath)) {
     const runtime: EditorRuntime = {
       mode: 'iframe',
       pluginId: pluginInfo.pluginId,
-      iframeUrl: runtimeEntryPath,
+      iframeUrl: resolvedEditorPath,
     };
     runtimeCache.set(normalizedCardType, runtime);
     runtimeCache.set(cardType, runtime);
@@ -700,7 +524,7 @@ export async function getEditorRuntime(cardType: string): Promise<EditorRuntime 
   }
 
   try {
-    const module = await import(/* @vite-ignore */ runtimeEntryPath);
+    const module = await import(/* @vite-ignore */ resolvedEditorPath);
     const component = (module as { default: Component }).default;
     componentCache.set(normalizedCardType, component);
     componentCache.set(cardType, component);
@@ -730,19 +554,6 @@ export async function getCardPluginPermissions(pluginId: string): Promise<Readon
     return pluginPermissionCache.get(pluginId) ?? new Set();
   }
 
-  let cardType = pluginIdToCardType.get(pluginId);
-  if (!cardType) {
-    await discoverCardPlugins();
-    cardType = pluginIdToCardType.get(pluginId);
-  }
-
-  if (cardType) {
-    const runtimeContext = await getCardRuntimeContext(cardType);
-    if (runtimeContext && runtimeContext.pluginId === pluginId && pluginPermissionCache.has(pluginId)) {
-      return pluginPermissionCache.get(pluginId) ?? new Set();
-    }
-  }
-
   const manifest = await loadPluginManifest(pluginId);
   const permissions = new Set<string>();
   const rawPermissions = manifest?.permissions;
@@ -764,23 +575,6 @@ export async function getLocalPluginVocabulary(
 ): Promise<Record<string, string> | null> {
   if (!pluginId || !locale) {
     return null;
-  }
-
-  let cardType = pluginIdToCardType.get(pluginId);
-  if (!cardType) {
-    await discoverCardPlugins();
-    cardType = pluginIdToCardType.get(pluginId);
-  }
-
-  if (cardType) {
-    const runtimeContext = await getCardRuntimeContext(cardType, locale);
-    if (runtimeContext && runtimeContext.pluginId === pluginId) {
-      const localeMap = pluginVocabularyCache.get(pluginId);
-      const direct = localeMap?.get(locale);
-      if (direct) {
-        return direct;
-      }
-    }
   }
 
   const vocabularyByLocale = await loadPluginVocabulary(pluginId);
@@ -825,5 +619,4 @@ export function __resetPluginServiceForTests(): void {
   pluginVocabularyCache.clear();
   pluginManifestLoadCache.clear();
   pluginVocabularyLoadCache.clear();
-  cardRuntimeContextCache.clear();
 }

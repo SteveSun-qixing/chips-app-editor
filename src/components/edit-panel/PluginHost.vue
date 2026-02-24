@@ -49,7 +49,6 @@ import type {
   IframeResizeMessage,
 } from './plugin-host/types';
 import { createIframeVocabularyLoader } from './plugin-host/vocabulary-loader';
-import { resolveBaseCardRuntimeType } from '@/components/window/base-card-runtime-type';
 
 // ==================== Props ====================
 interface Props {
@@ -363,13 +362,6 @@ const currentBaseCard = computed(() => {
   return targetCard.structure.find(bc => bc.id === props.baseCardId) ?? null;
 });
 
-const runtimeCardType = computed(() =>
-  resolveBaseCardRuntimeType({
-    type: props.cardType,
-    config: props.config,
-  })
-);
-
 /** 加载状态文本 */
 const loadingText = computed(() => {
   return t('plugin_host.loading');
@@ -399,10 +391,8 @@ function endLoading(): void {
  * 加载编辑器插件
  */
 async function loadPlugin(): Promise<void> {
-  const resolvedCardType = runtimeCardType.value || props.cardType;
-
   // 如果是已加载过的类型，不显示加载状态（组件已缓存）
-  const isFirstLoad = !loadedTypes.has(resolvedCardType);
+  const isFirstLoad = !loadedTypes.has(props.cardType);
   
   if (isFirstLoad) {
     startLoading();
@@ -415,7 +405,7 @@ async function loadPlugin(): Promise<void> {
     await unloadPlugin();
     
     // 获取编辑器运行时（组件模式或 iframe 模式）
-    const runtime = await getEditorRuntime(resolvedCardType);
+    const runtime = await getEditorRuntime(props.cardType);
     if (runtime?.mode === 'component' && runtime.component) {
       currentEditorComponent.value = markRaw(runtime.component);
       runtimeMode.value = 'component';
@@ -425,8 +415,8 @@ async function loadPlugin(): Promise<void> {
       iframeVocabulary.value = {};
       clearIframeSecurityContext();
       emit('plugin-loaded', null);
-      loadedTypes.add(resolvedCardType);
-      console.warn('[PluginHost] 加载组件模式编辑器:', resolvedCardType);
+      loadedTypes.add(props.cardType);
+      console.warn('[PluginHost] 加载组件模式编辑器:', props.cardType);
     } else if (runtime?.mode === 'iframe' && runtime.iframeUrl) {
       currentEditorComponent.value = null;
       runtimeMode.value = 'iframe';
@@ -437,8 +427,8 @@ async function loadPlugin(): Promise<void> {
       resetIframeSecurityContext(runtime.iframeUrl, runtime.pluginId);
       void ensureIframePermissionsLoaded(runtime.pluginId);
       emit('plugin-loaded', null);
-      loadedTypes.add(resolvedCardType);
-      console.warn('[PluginHost] 加载 iframe 模式编辑器:', resolvedCardType, runtime.iframeUrl);
+      loadedTypes.add(props.cardType);
+      console.warn('[PluginHost] 加载 iframe 模式编辑器:', props.cardType, runtime.iframeUrl);
     } else {
       // 没有找到插件，使用默认编辑器
       currentPlugin.value = null;
@@ -1163,11 +1153,8 @@ async function reload(): Promise<void> {
 }
 
 // ==================== Watchers ====================
-// 监听运行时卡片类型变化（兼容结构 type 与 config.card_type 口径差异）
-watch(runtimeCardType, async (nextType, previousType) => {
-  if (nextType === previousType) {
-    return;
-  }
+// 监听卡片类型变化
+watch(() => props.cardType, async () => {
   await loadPlugin();
 });
 

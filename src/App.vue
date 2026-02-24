@@ -20,12 +20,14 @@ import { generateId62, generateScopedId } from '@/utils';
 import { initializeEditorI18n, t, setLocale } from '@/services/i18n-service';
 import { initializeSettingsService } from '@/services/settings-service';
 import { resourceService, setWorkspacePaths } from '@/services/resource-service';
+import { resolveWorkspaceRootFromBridge } from '@/services/workspace-bootstrap-service';
 import { loadBaseCardConfigsFromContent } from '@/core/base-card-content-loader';
 import {
   subscribePluginInit,
   extractLaunchFilePath,
   extractWorkspaceRoot,
   extractExternalRoot,
+  extractWorkspaceRootFromLaunchFile,
 } from '@/utils/plugin-init';
 import yaml from 'yaml';
 
@@ -409,26 +411,45 @@ async function createCompositeCard(
     },
   };
 
+  let workspaceFile: Awaited<ReturnType<typeof workspaceService.createCard>>;
+  try {
+    workspaceFile = await workspaceService.createCard(
+      cardName,
+      { type: data.typeId, id: baseCardId },
+      cardId
+    );
+  } catch (error) {
+    console.error('[App] Failed to create card workspace file', {
+      cardId,
+      cardName,
+      error,
+    });
+    return;
+  }
+
   // 创建卡片数据并添加到 cardStore
-  cardStore.addCard({
-    id: cardId,
-    metadata: {
-      chip_standards_version: '1.0.0',
-      card_id: cardId,
-      name: cardName,
-      created_at: timestamp,
-      modified_at: timestamp,
-    },
-    structure: {
-      structure: [baseCard],
-      manifest: {
-        card_count: 1,
-        resource_count: 0,
-        resources: [],
+  cardStore.addCard(
+    {
+      id: cardId,
+      metadata: {
+        chip_standards_version: '1.0.0',
+        card_id: cardId,
+        name: cardName,
+        created_at: timestamp,
+        modified_at: timestamp,
       },
+      structure: {
+        structure: [baseCard],
+        manifest: {
+          card_count: 1,
+          resource_count: 0,
+          resources: [],
+        },
+      },
+      resources: new Map<string, Blob | ArrayBuffer>(),
     },
-    resources: new Map<string, Blob | ArrayBuffer>(),
-  });
+    workspaceFile.path
+  );
 
   // 设置为活动卡片
   cardStore.setActiveCard(cardId);
@@ -453,14 +474,6 @@ async function createCompositeCard(
   // 添加窗口到 uiStore
   uiStore.addWindow(windowConfig);
   uiStore.focusWindow(windowId);
-
-  // 创建工作区文件记录（使用相同的 cardId 确保数据同步）
-  const workspaceFile = await workspaceService.createCard(
-    cardName,
-    { type: data.typeId, id: baseCardId },
-    cardId
-  );
-  cardStore.updateFilePath(cardId, workspaceFile.path);
 
   console.warn('[App] 已创建复合卡片:', cardName, 'ID:', cardId, '包含基础卡片:', data.name);
 }
@@ -531,6 +544,24 @@ function handleRetry(): void {
   globalThis.location.reload();
 }
 
+async function bootstrapWorkspacePathsFromBridge(): Promise<void> {
+  if (resourceService.workspaceRoot.trim().length > 0) {
+    return;
+  }
+
+  if (typeof window === 'undefined' || !window.chips) {
+    return;
+  }
+
+  const workspaceRoot = await resolveWorkspaceRootFromBridge(window.chips);
+  if (!workspaceRoot) {
+    console.warn('[Chips Editor] Workspace root is empty. Run `chips workspace set <path>` to configure it.');
+    return;
+  }
+
+  setWorkspacePaths(workspaceRoot, '');
+}
+
 /**
  * 初始化应用
  */
@@ -538,11 +569,14 @@ onMounted(async () => {
   try {
     // 订阅插件初始化事件，从 Host 获取工作区路径和启动文件
     unsubscribePluginInit = subscribePluginInit((payload) => {
-      const workspaceRoot = extractWorkspaceRoot(payload);
+      const workspaceRoot = extractWorkspaceRoot(payload) ?? extractWorkspaceRootFromLaunchFile(payload);
       const externalRoot = extractExternalRoot(payload);
 
       if (workspaceRoot) {
         setWorkspacePaths(workspaceRoot, externalRoot ?? '');
+        void workspaceService.initialize().catch((err: unknown) => {
+          console.warn('[Chips Editor] Failed to reinitialize workspace root:', err);
+        });
       }
 
       // 如果有启动文件路径，自动打开该卡片
@@ -555,6 +589,8 @@ onMounted(async () => {
     });
 
     await initializeEditorI18n(locale.value);
+
+    await bootstrapWorkspacePathsFromBridge();
 
     // 初始化工作区服务
     await workspaceService.initialize();

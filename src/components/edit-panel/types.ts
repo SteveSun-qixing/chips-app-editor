@@ -26,6 +26,8 @@ export interface EditPanelProps {
  * 插件宿主属性
  */
 export interface PluginHostProps {
+  /** 复合卡片 ID */
+  cardId?: string;
   /** 基础卡片类型 */
   cardType: string;
   /** 基础卡片 ID */

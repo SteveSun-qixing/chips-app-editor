@@ -1,16 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { saveCardMock, writeTextMock } = vi.hoisted(() => ({
-  saveCardMock: vi.fn(),
+const { writeTextMock } = vi.hoisted(() => ({
   writeTextMock: vi.fn(),
-}));
-
-vi.mock('@/services/sdk-service', () => ({
-  getEditorSdk: vi.fn(async () => ({
-    card: {
-      save: saveCardMock,
-    },
-  })),
 }));
 
 vi.mock('@/services/resource-service', () => ({
@@ -24,9 +15,7 @@ import { saveCardToWorkspace } from '@/services/card-persistence-service';
 
 describe('card-persistence-service', () => {
   beforeEach(() => {
-    saveCardMock.mockReset();
     writeTextMock.mockReset();
-    saveCardMock.mockResolvedValue(undefined);
     writeTextMock.mockResolvedValue(undefined);
   });
 
@@ -63,24 +52,21 @@ describe('card-persistence-service', () => {
 
     await saveCardToWorkspace(card as any);
 
-    expect(saveCardMock).toHaveBeenCalledTimes(1);
-    const [cardPath, payload, saveOptions] = saveCardMock.mock.calls[0]!;
-    expect(cardPath).toBe('TestWorkspace/card-001.card');
-    expect(saveOptions).toEqual({ overwrite: true });
-    expect(payload.metadata.card_id).toBe('card-001');
-    expect(payload.metadata.modified_at).toBeTruthy();
-    expect(payload.structure.structure).toEqual([
-      { id: 'base-001', type: 'RichTextCard' },
-      { id: 'base-002', type: 'ImageCard' },
-    ]);
-
-    expect(writeTextMock).toHaveBeenCalledTimes(2);
+    expect(writeTextMock).toHaveBeenCalledTimes(4);
     expect(writeTextMock).toHaveBeenCalledWith(
-      'TestWorkspace/card-001.card/content/base-001.yaml',
+      expect.stringContaining('/TestWorkspace/card-001.card/.card/metadata.yaml'),
+      expect.stringContaining('card_id: card-001')
+    );
+    expect(writeTextMock).toHaveBeenCalledWith(
+      expect.stringContaining('/TestWorkspace/card-001.card/.card/structure.yaml'),
+      expect.stringContaining('card_count: 2')
+    );
+    expect(writeTextMock).toHaveBeenCalledWith(
+      expect.stringContaining('/TestWorkspace/card-001.card/content/base-001.yaml'),
       expect.stringContaining('type: RichTextCard')
     );
     expect(writeTextMock).toHaveBeenCalledWith(
-      'TestWorkspace/card-001.card/content/base-002.yaml',
+      expect.stringContaining('/TestWorkspace/card-001.card/content/base-002.yaml'),
       expect.stringContaining('type: ImageCard')
     );
   });
@@ -109,20 +95,18 @@ describe('card-persistence-service', () => {
 
     await saveCardToWorkspace(card as any, 'Workspace/B.card');
 
-    expect(saveCardMock).toHaveBeenCalledTimes(1);
-    expect(saveCardMock).toHaveBeenCalledWith(
-      'Workspace/B.card',
-      expect.any(Object),
-      { overwrite: true }
+    expect(writeTextMock).toHaveBeenCalledWith(
+      expect.stringContaining('/TestWorkspace/Workspace/B.card/.card/metadata.yaml'),
+      expect.any(String)
     );
     expect(writeTextMock).toHaveBeenCalledWith(
-      'Workspace/B.card/content/base-001.yaml',
+      expect.stringContaining('/TestWorkspace/Workspace/B.card/content/base-001.yaml'),
       expect.any(String)
     );
   });
 
-  it('throws when sdk save fails', async () => {
-    saveCardMock.mockRejectedValueOnce(new Error('save failed'));
+  it('throws when writing metadata fails', async () => {
+    writeTextMock.mockRejectedValueOnce(new Error('save failed'));
 
     const card = {
       id: 'card-003',
@@ -139,6 +123,6 @@ describe('card-persistence-service', () => {
     };
 
     await expect(saveCardToWorkspace(card as any)).rejects.toThrow('save failed');
-    expect(writeTextMock).not.toHaveBeenCalled();
+    expect(writeTextMock).toHaveBeenCalledTimes(1);
   });
 });

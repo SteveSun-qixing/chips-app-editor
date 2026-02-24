@@ -1,29 +1,30 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
+import { describe, expect, it } from 'vitest';
 import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
 
 describe('card-path-service', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  const workspaceRoot = '/Users/sevenstars/Documents/ChipsCard/Develop/Project-12/ProductFinishedProductTestingSpace/TestWorkspace';
+
+  it('keeps absolute file path unchanged', () => {
+    const absolutePath = '/tmp/cards/demo-card';
+    expect(resolveCardPath('demo-card', absolutePath, workspaceRoot)).toBe(absolutePath);
   });
 
-  it('prefers explicit file path', () => {
-    expect(resolveCardPath('card-001', ' Workspace/real.card ')).toBe('Workspace/real.card');
-  });
-
-  it('builds fallback path from workspace root when file path missing', () => {
-    expect(resolveCardPath('card-001', undefined, '/ProductFinishedProductTestingSpace/TestWorkspace')).toBe(
-      'TestWorkspace/card-001.card',
+  it('resolves workspace-relative file path to absolute path', () => {
+    const relativePath = 'TestWorkspace/demo-card';
+    expect(resolveCardPath('demo-card', relativePath, workspaceRoot)).toBe(
+      '/Users/sevenstars/Documents/ChipsCard/Develop/Project-12/ProductFinishedProductTestingSpace/TestWorkspace/demo-card'
     );
   });
 
-  it('falls back to card id when workspace root is unavailable', () => {
-    expect(resolveCardPath('card-001')).toBe('card-001.card');
+  it('falls back to workspace card path when filePath is missing', () => {
+    expect(resolveCardPath('demo-card', undefined, workspaceRoot)).toBe(
+      '/Users/sevenstars/Documents/ChipsCard/Develop/Project-12/ProductFinishedProductTestingSpace/TestWorkspace/demo-card.card'
+    );
   });
 
-  it('requireCardPath throws when card id and file path are both missing', () => {
-    expect(() => requireCardPath(undefined, undefined, 'unit-test')).toThrow(
-      '[CardPath] Missing card path for unit-test',
+  it('throws when card id and filePath are both missing', () => {
+    expect(() => requireCardPath(undefined, undefined, 'unit test')).toThrow(
+      '[CardPath] Missing card path for unit test'
     );
   });
 });

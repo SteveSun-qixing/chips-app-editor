@@ -1,9 +1,9 @@
 import type { Card as SDKCard } from '@chips/sdk';
 import type { CardInfo } from '@/core/state/stores/card';
+import yaml from 'yaml';
 import { stringifyBaseCardContentYaml } from '@/core/base-card-content-loader';
 import { requireCardPath } from './card-path-service';
 import { resourceService } from './resource-service';
-import { getEditorSdk } from './sdk-service';
 
 function resolveCardPath(card: CardInfo, cardPath?: string): string {
   return requireCardPath(
@@ -41,9 +41,8 @@ export async function saveCardToWorkspace(card: CardInfo, cardPath?: string): Pr
   const path = resolveCardPath(card, cardPath);
   const modifiedAt = new Date().toISOString();
   const payload = createCardSavePayload(card, modifiedAt);
-  const sdk = await getEditorSdk();
-
-  await sdk.card.save(path, payload, { overwrite: true });
+  await resourceService.writeText(`${path}/.card/metadata.yaml`, yaml.stringify(payload.metadata));
+  await resourceService.writeText(`${path}/.card/structure.yaml`, yaml.stringify(payload.structure));
 
   const contentDir = `${path}/content`;
   for (const baseCard of card.structure) {

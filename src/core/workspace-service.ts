@@ -292,12 +292,14 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 初始化工作区
    */
   async function initialize(): Promise<void> {
-    if (state.value.initialized) return;
+    const nextRootPath = resourceService.workspaceRoot;
+    const hasRootChanged = state.value.rootPath !== nextRootPath;
+    if (state.value.initialized && !hasRootChanged) return;
 
     try {
       // 在初始化时计算工作区相对路径（此时 setWorkspacePaths 可能尚未被调用）
-      workspaceRootRelative = toRootRelative(resourceService.workspaceRoot);
-      state.value.rootPath = resourceService.workspaceRoot;
+      workspaceRootRelative = toRootRelative(nextRootPath);
+      state.value.rootPath = nextRootPath;
 
       // 仅在工作区路径已设置时创建目录和扫描文件
       if (workspaceRootRelative) {
@@ -308,9 +310,13 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
           console.warn('[WorkspaceService] ensureDir skipped:', err);
         }
         await refresh();
+      } else {
+        state.value.files = [];
       }
 
-      state.value.initialized = true;
+      if (!state.value.initialized) {
+        state.value.initialized = true;
+      }
 
       eventEmitter.emit('workspace:initialized', { rootPath: state.value.rootPath });
       console.warn('[WorkspaceService] 工作区已初始化:', state.value.rootPath);

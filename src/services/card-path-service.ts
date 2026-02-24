@@ -6,22 +6,48 @@ function normalizePath(value?: string | null): string {
   return value.trim().replace(/\\/g, '/');
 }
 
-function toRootRelative(path: string): string {
-  const normalizedPath = normalizePath(path);
-  if (!normalizedPath) {
-    return '';
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/') || /^[a-zA-Z]:\//.test(path);
+}
+
+function stripLeadingSlash(path: string): string {
+  return path.replace(/^\/+/, '');
+}
+
+function joinPath(base: string, segment: string): string {
+  const normalizedBase = base.replace(/\/+$/, '');
+  const normalizedSegment = stripLeadingSlash(segment);
+  if (!normalizedBase) {
+    return normalizedSegment;
+  }
+  if (!normalizedSegment) {
+    return normalizedBase;
+  }
+  return `${normalizedBase}/${normalizedSegment}`;
+}
+
+function resolveFromWorkspaceRoot(path: string, workspaceRoot: string): string {
+  const normalizedWorkspaceRoot = normalizePath(workspaceRoot).replace(/\/+$/, '');
+  if (!normalizedWorkspaceRoot) {
+    return path;
   }
 
-  const rootPrefix = normalizedPath.split('/').slice(0, -1).join('/');
-  if (rootPrefix && normalizedPath.startsWith(`${rootPrefix}/`)) {
-    return normalizedPath.slice(rootPrefix.length + 1);
+  if (isAbsolutePath(path)) {
+    return path;
   }
 
-  if (normalizedPath.startsWith('/')) {
-    return normalizedPath.slice(1);
+  const workspaceParent = normalizedWorkspaceRoot.split('/').slice(0, -1).join('/');
+  const workspaceFolder = normalizedWorkspaceRoot.split('/').pop() ?? '';
+
+  if (!workspaceParent || !workspaceFolder) {
+    return joinPath(normalizedWorkspaceRoot, path);
   }
 
-  return normalizedPath;
+  if (path.startsWith(`${workspaceFolder}/`)) {
+    return joinPath(workspaceParent, path);
+  }
+
+  return joinPath(normalizedWorkspaceRoot, path);
 }
 
 export function resolveCardPath(
@@ -31,6 +57,10 @@ export function resolveCardPath(
 ): string {
   const directPath = normalizePath(filePath);
   if (directPath) {
+    const normalizedWorkspaceRoot = normalizePath(workspaceRoot);
+    if (normalizedWorkspaceRoot) {
+      return resolveFromWorkspaceRoot(directPath, normalizedWorkspaceRoot);
+    }
     return directPath;
   }
 
@@ -41,10 +71,14 @@ export function resolveCardPath(
 
   const normalizedWorkspaceRoot = normalizePath(workspaceRoot);
   if (normalizedWorkspaceRoot) {
-    const workspaceRootRelative = toRootRelative(normalizedWorkspaceRoot);
-    if (workspaceRootRelative) {
-      return `${workspaceRootRelative}/${normalizedCardId}.card`;
+    const workspaceFolder = normalizedWorkspaceRoot.split('/').pop();
+    if (workspaceFolder) {
+      return resolveFromWorkspaceRoot(
+        `${workspaceFolder}/${normalizedCardId}.card`,
+        normalizedWorkspaceRoot
+      );
     }
+    return resolveFromWorkspaceRoot(`${normalizedCardId}.card`, normalizedWorkspaceRoot);
   }
 
   return `${normalizedCardId}.card`;

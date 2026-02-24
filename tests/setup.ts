@@ -5,7 +5,7 @@
 import { beforeAll, vi } from 'vitest';
 import { defineComponent, h, ref } from 'vue';
 import fs from 'fs/promises';
-import path from 'path';
+import path from 'node:path';
 import JSZip from 'jszip';
 import { resourceServiceMock, resetResourceServiceMock } from './helpers/resource-service-mock';
 import { installMockBridge, resetMockBridge } from './helpers/mock-bridge';

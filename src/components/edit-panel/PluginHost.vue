@@ -9,15 +9,17 @@
  * - 根据基础卡片类型动态加载对应的编辑器组件
  */
 
-import { ref, computed, watch, onMounted, onUnmounted, shallowRef, nextTick, markRaw, type Component } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, shallowRef, nextTick, markRaw, toRaw, type Component } from 'vue';
 import { Button } from '@chips/components';
 import { useCardStore, useEditorStore, useUIStore } from '@/core/state';
+import type { CardInfo } from '@/core/state/stores/card';
 import DefaultEditor from './DefaultEditor.vue';
 import type { EditorPlugin } from './types';
 import { getEditorRuntime, getLocalPluginVocabulary, getCardPluginPermissions } from '@/services/plugin-service';
 import { t } from '@/services/i18n-service';
 import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
+import { resourceService } from '@/services/resource-service';
 import {
   buildCardResourceFullPath,
   releaseCardResourceUrl,
@@ -27,6 +29,8 @@ import {
 
 // ==================== Props ====================
 interface Props {
+  /** 复合卡片 ID（用于定位非活动窗口的卡片） */
+  cardId?: string;
   /** 基础卡片类型 */
   cardType: string;
   /** 基础卡片 ID */
@@ -206,6 +210,106 @@ interface IframeI18nEnvelope {
   locale: string;
   version: string;
   payload: IframeVocabularyPayload;
+}
+
+interface PendingFileTransferPayload {
+  name: string;
+  type: string;
+  lastModified: number;
+  buffer: ArrayBuffer;
+}
+
+function isPendingFileTransferPayload(value: unknown): value is PendingFileTransferPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.name === 'string'
+    && typeof record.type === 'string'
+    && typeof record.lastModified === 'number'
+    && record.buffer instanceof ArrayBuffer
+  );
+}
+
+function isFileLikePayload(value: unknown): value is {
+  arrayBuffer: () => Promise<ArrayBuffer>;
+} {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  return typeof (value as { arrayBuffer?: unknown }).arrayBuffer === 'function';
+}
+
+async function toPendingFileArrayBuffer(value: unknown): Promise<ArrayBuffer | null> {
+  if (isPendingFileTransferPayload(value)) {
+    return value.buffer;
+  }
+
+  if (isFileLikePayload(value)) {
+    try {
+      return await value.arrayBuffer();
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function encodeArrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function getTargetCard(): CardInfo | null {
+  if (props.cardId) {
+    return cardStore.getCard(props.cardId) ?? null;
+  }
+  return cardStore.activeCard;
+}
+
+function resolveTargetCardPath(card: CardInfo | null): string {
+  return resolveCardPath(card?.id, card?.filePath, resourceService.workspaceRoot);
+}
+
+async function writePendingResource(
+  cardId: string,
+  cardPath: string,
+  relativeFilePath: string,
+  data: ArrayBuffer
+): Promise<void> {
+  if (typeof window === 'undefined' || !window.chips) {
+    throw new Error('window.chips is unavailable');
+  }
+
+  const normalizedRelativePath = relativeFilePath.replace(/^\/+/, '');
+  const chipsUri = `chips://card/${cardId}/${normalizedRelativePath}`;
+
+  try {
+    await window.chips.invoke('resource', 'write', {
+      uri: chipsUri,
+      data,
+    });
+    console.warn(`[PluginHost] Resource saved via chips://: ${chipsUri}`);
+    return;
+  } catch (resourceWriteError) {
+    const fullPath = buildCardResourceFullPath(cardPath, normalizedRelativePath);
+    await window.chips.invoke('file', 'write', {
+      path: fullPath,
+      content: encodeArrayBufferToBase64(data),
+      encoding: 'base64',
+      createDirs: true,
+    });
+    console.warn(`[PluginHost] Resource saved via file.write fallback: ${fullPath}`, resourceWriteError);
+  }
 }
 
 async function resolveEditorResource(fullPath: string): Promise<string> {
@@ -425,8 +529,8 @@ async function ensureIframePermissionsLoaded(pluginId: string): Promise<void> {
  * 策略：优先使用 SDK ResourceManager（含缓存），失败时直接从 dev-file-server 获取。
  */
 const editorOptions = computed(() => {
-  const activeCard = cardStore.activeCard;
-  const cardPath = resolveCardPath(activeCard?.id, activeCard?.filePath);
+  const targetCard = getTargetCard();
+  const cardPath = resolveTargetCardPath(targetCard);
   return {
     toolbar: true,
     autoSave: true,
@@ -671,11 +775,11 @@ function handleEditorBlur(): void {
  * PluginHost 负责通过 chips:// 协议将这些文件写入卡片文件夹根目录，
  * 然后清除 _pendingFiles 字段，只保留纯净的配置数据。
  *
- * 符合薯片协议规范：所有资源写入通过内核的 resource.write 服务完成。
+ * 优先通过 resource.write，若运行时未提供该路由则自动回退到 file.write。
  */
 async function handleImageCardConfigChange(newConfig: Record<string, unknown>): Promise<void> {
   // 提取待上传的文件
-  const pendingFiles = newConfig._pendingFiles as Record<string, File> | undefined;
+  const pendingFiles = newConfig._pendingFiles as Record<string, unknown> | undefined;
 
   // 从配置中移除 _pendingFiles（不应保存到卡片配置文件）
   const cleanConfig = { ...newConfig };
@@ -683,25 +787,25 @@ async function handleImageCardConfigChange(newConfig: Record<string, unknown>): 
 
   // 如果有待上传的文件，通过 chips:// 协议写入卡片文件夹
   if (pendingFiles && Object.keys(pendingFiles).length > 0) {
-    const activeCard = cardStore.activeCard;
-    if (activeCard) {
-      const cardPath = resolveCardPath(activeCard.id, activeCard.filePath);
+    const targetCard = getTargetCard();
+    if (targetCard) {
+      const cardPath = resolveTargetCardPath(targetCard);
       if (!cardPath) {
         console.error('[PluginHost] Missing card path, skip pending resource write', {
-          cardId: activeCard.id,
+          cardId: targetCard.id,
         });
       } else if (typeof window === 'undefined' || !window.chips) {
         console.error('[PluginHost] Failed to save resources: window.chips is unavailable');
       } else {
         for (const [relativeFilePath, file] of Object.entries(pendingFiles)) {
+          const arrayBuffer = await toPendingFileArrayBuffer(file);
+          if (!arrayBuffer) {
+            console.error(`[PluginHost] Invalid pending file payload: ${relativeFilePath}`);
+            continue;
+          }
+
           try {
-            const arrayBuffer = await file.arrayBuffer();
-            const chipsUri = `chips://card/${cardPath}/${relativeFilePath}`;
-            await window.chips.invoke('resource', 'write', {
-              uri: chipsUri,
-              data: arrayBuffer,
-            });
-            console.warn(`[PluginHost] Resource saved via chips://: ${chipsUri}`);
+            await writePendingResource(targetCard.id, cardPath, relativeFilePath, arrayBuffer);
           } catch (error) {
             console.error(`[PluginHost] Failed to save resource: ${relativeFilePath}`, error);
           }
@@ -720,12 +824,73 @@ function buildThemeCss(): string {
   return cssText ? `:root { ${cssText} }` : '';
 }
 
-function postMessageToIframe(message: Record<string, unknown>): void {
+function normalizePostMessageValue(value: unknown): unknown {
+  const raw = value !== null && typeof value === 'object' ? toRaw(value) : value;
+
+  if (raw === null || raw === undefined) {
+    return raw;
+  }
+
+  if (
+    typeof raw === 'string'
+    || typeof raw === 'number'
+    || typeof raw === 'boolean'
+    || raw instanceof ArrayBuffer
+    || ArrayBuffer.isView(raw)
+    || raw instanceof Date
+    || raw instanceof RegExp
+  ) {
+    return raw;
+  }
+
+  if (Array.isArray(raw)) {
+    return raw.map((item) => normalizePostMessageValue(item));
+  }
+
+  if (typeof raw === 'object') {
+    const normalized: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof item === 'function' || typeof item === 'symbol') {
+        continue;
+      }
+      normalized[key] = normalizePostMessageValue(item);
+    }
+    return normalized;
+  }
+
+  return raw;
+}
+
+function buildPostMessagePayload(message: Record<string, unknown>): Record<string, unknown> {
+  const normalized = normalizePostMessageValue(message) as Record<string, unknown>;
+  if (typeof structuredClone === 'function') {
+    try {
+      return structuredClone(normalized);
+    } catch {
+      return normalized;
+    }
+  }
+  return normalized;
+}
+
+function postMessageToIframe(message: Record<string, unknown>): boolean {
   const iframeWindow = pluginIframeRef.value?.contentWindow;
   if (!iframeWindow) {
-    return;
+    return false;
   }
-  iframeWindow.postMessage(message, getIframeTargetOrigin());
+
+  try {
+    const payload = buildPostMessagePayload(message);
+    iframeWindow.postMessage(payload, getIframeTargetOrigin());
+    return true;
+  } catch (error) {
+    console.error('[PluginHost] Failed to post message to iframe', {
+      pluginId: iframePluginId.value,
+      type: message.type,
+      error,
+    });
+    return false;
+  }
 }
 
 function toStringRecord(value: unknown): Record<string, string> | null {
@@ -826,15 +991,16 @@ async function loadIframeVocabulary(locale: string): Promise<Record<string, stri
   return resolvedVocabulary;
 }
 
-function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): void {
+function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.value): boolean {
   if (!useIframeEditor.value) {
-    return;
+    return false;
   }
 
-  const activeCard = cardStore.activeCard;
+  const targetCard = getTargetCard();
+  const cardPath = resolveTargetCardPath(targetCard);
   const locale = editorStore.locale ?? 'zh-CN';
   const i18n = buildI18nEnvelope(locale, vocabulary);
-  postMessageToIframe({
+  return postMessageToIframe({
     type: 'init',
     payload: {
       config: { ...localConfig.value },
@@ -849,8 +1015,8 @@ function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.va
         },
       },
       resources: {
-        cardId: activeCard?.id ?? '',
-        cardPath: activeCard?.filePath ?? '',
+        cardId: targetCard?.id ?? '',
+        cardPath,
       },
       locale: i18n.locale,
       vocabularyVersion: i18n.version,
@@ -1148,7 +1314,10 @@ function handleIframeMessage(event: MessageEvent): void {
 async function handleIframeLoad(): Promise<void> {
   const locale = editorStore.locale ?? 'zh-CN';
   const vocabulary = await loadIframeVocabulary(locale);
-  sendIframeInit(vocabulary);
+  const initPosted = sendIframeInit(vocabulary);
+  if (!initPosted) {
+    throw new Error('Failed to initialize iframe editor runtime');
+  }
   postIframeLanguageChange(locale, vocabulary);
 }
 
@@ -1188,14 +1357,14 @@ function flushPendingConfigEmit(): void {
  * 更新 Store 中的配置
  */
 function updateStoreConfig(): void {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) return;
+  const targetCard = getTargetCard();
+  if (!targetCard) return;
   
-  const baseCardIndex = activeCard.structure.findIndex(bc => bc.id === props.baseCardId);
+  const baseCardIndex = targetCard.structure.findIndex((bc) => bc.id === props.baseCardId);
   if (baseCardIndex === -1) return;
   
   // 创建新的 structure 数组
-  const newStructure = [...activeCard.structure];
+  const newStructure = [...targetCard.structure];
   const currentBaseCard = newStructure[baseCardIndex];
   if (!currentBaseCard) {
     return;
@@ -1206,22 +1375,27 @@ function updateStoreConfig(): void {
   };
   
   // 更新 store
-  cardStore.updateCardStructure(activeCard.id, newStructure);
+  cardStore.updateCardStructure(targetCard.id, newStructure);
   editorStore.markUnsaved();
 }
 
 async function persistCardConfig(): Promise<void> {
-  const activeCard = cardStore.activeCard;
-  if (!activeCard) {
-    return;
+  const targetCard = getTargetCard();
+  if (!targetCard) {
+    throw new Error('Target card is unavailable');
   }
 
-  const cardPath = requireCardPath(activeCard.id, activeCard.filePath, 'PluginHost.persistCardConfig');
-  await saveCardToWorkspace(activeCard, cardPath);
-  if (!activeCard.filePath) {
-    cardStore.updateFilePath(activeCard.id, cardPath);
+  const cardPath = requireCardPath(
+    targetCard.id,
+    targetCard.filePath,
+    'PluginHost.persistCardConfig',
+    resourceService.workspaceRoot,
+  );
+  await saveCardToWorkspace(targetCard, cardPath);
+  if (!targetCard.filePath) {
+    cardStore.updateFilePath(targetCard.id, cardPath);
   }
-  cardStore.markCardSaved(activeCard.id);
+  cardStore.markCardSaved(targetCard.id);
   if (!cardStore.hasModifiedCards) {
     editorStore.markSaved();
   }
@@ -1259,10 +1433,10 @@ async function saveConfig(): Promise<void> {
     hasUnsavedChanges.value = false;
   } catch (error) {
     hasUnsavedChanges.value = true;
-    const activeCard = cardStore.activeCard;
-    const cardPath = resolveCardPath(activeCard?.id, activeCard?.filePath);
+    const targetCard = getTargetCard();
+    const cardPath = resolveTargetCardPath(targetCard);
     console.error('[PluginHost] Failed to persist card config', {
-      cardId: activeCard?.id ?? '',
+      cardId: targetCard?.id ?? '',
       baseCardId: props.baseCardId,
       cardPath,
       error,

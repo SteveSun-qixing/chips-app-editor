@@ -37,51 +37,58 @@ export function parsePluginInitPayload(payload: unknown): PluginInitPayload | nu
   const pluginId = typeof record.pluginId === 'string' ? record.pluginId : undefined;
   const timestamp = typeof record.timestamp === 'number' ? record.timestamp : undefined;
   const launchParamsRecord = toRecord(record.launchParams);
+  const launchParams = launchParamsRecord ?? {};
+  const topLevelWorkspaceRoot = typeof record.workspaceRoot === 'string' ? record.workspaceRoot : undefined;
+  const topLevelExternalRoot = typeof record.externalRoot === 'string' ? record.externalRoot : undefined;
 
   return {
     ...(pluginId ? { pluginId } : {}),
-    ...(launchParamsRecord
+    ...(launchParamsRecord || topLevelWorkspaceRoot || topLevelExternalRoot
       ? {
           launchParams: {
-            ...(typeof launchParamsRecord.reason === 'string'
-              ? { reason: launchParamsRecord.reason }
+            ...(typeof launchParams.reason === 'string'
+              ? { reason: launchParams.reason }
               : {}),
-            ...(typeof launchParamsRecord.source === 'string'
-              ? { source: launchParamsRecord.source }
+            ...(typeof launchParams.source === 'string'
+              ? { source: launchParams.source }
               : {}),
-            ...(typeof launchParamsRecord.requestedAt === 'string'
-              ? { requestedAt: launchParamsRecord.requestedAt }
+            ...(typeof launchParams.requestedAt === 'string'
+              ? { requestedAt: launchParams.requestedAt }
               : {}),
-            ...(typeof launchParamsRecord.workspaceRoot === 'string'
-              ? { workspaceRoot: launchParamsRecord.workspaceRoot }
-              : {}),
-            ...(typeof launchParamsRecord.externalRoot === 'string'
-              ? { externalRoot: launchParamsRecord.externalRoot }
-              : {}),
-            ...(toRecord(launchParamsRecord.file)
+            ...(typeof launchParams.workspaceRoot === 'string'
+              ? { workspaceRoot: launchParams.workspaceRoot }
+              : topLevelWorkspaceRoot
+                ? { workspaceRoot: topLevelWorkspaceRoot }
+                : {}),
+            ...(typeof launchParams.externalRoot === 'string'
+              ? { externalRoot: launchParams.externalRoot }
+              : topLevelExternalRoot
+                ? { externalRoot: topLevelExternalRoot }
+                : {}),
+            ...(toRecord(launchParams.file)
               ? {
                   file: {
-                    ...(typeof (launchParamsRecord.file as Record<string, unknown>).path ===
+                    ...(typeof (launchParams.file as Record<string, unknown>).path ===
                     'string'
                       ? {
                           path: String(
-                            (launchParamsRecord.file as Record<string, unknown>).path
+                            (launchParams.file as Record<string, unknown>).path
                           ),
                         }
                       : {}),
-                    ...(typeof (launchParamsRecord.file as Record<string, unknown>)
+                    ...(typeof (launchParams.file as Record<string, unknown>)
                       .extension === 'string'
                       ? {
                           extension: String(
-                            (launchParamsRecord.file as Record<string, unknown>).extension
+                            (launchParams.file as Record<string, unknown>).extension
                           ),
                         }
                       : {}),
-                    ...(typeof (launchParamsRecord.file as Record<string, unknown>).kind ===
+                    ...(typeof (launchParams.file as Record<string, unknown>).kind ===
                     'string'
                       ? {
                           kind: String(
-                            (launchParamsRecord.file as Record<string, unknown>).kind
+                            (launchParams.file as Record<string, unknown>).kind
                           ),
                         }
                       : {}),
@@ -105,6 +112,25 @@ export function extractLaunchFilePath(payload: PluginInitPayload): string | null
   }
   const normalized = rawPath.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+/**
+ * 从启动文件路径推断工作区根路径
+ */
+export function extractWorkspaceRootFromLaunchFile(payload: PluginInitPayload): string | null {
+  const launchFilePath = extractLaunchFilePath(payload);
+  if (!launchFilePath) {
+    return null;
+  }
+
+  const normalized = launchFilePath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const separatorIndex = normalized.lastIndexOf('/');
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  const workspaceRoot = normalized.slice(0, separatorIndex);
+  return workspaceRoot.length > 0 ? workspaceRoot : null;
 }
 
 /**

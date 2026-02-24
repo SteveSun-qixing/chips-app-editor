@@ -151,7 +151,9 @@ const {
 // 全局 mock 设置
 
 // Mock @chips/sdk
-vi.mock('@chips/sdk', () => {
+vi.mock('@chips/sdk', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@chips/sdk');
+
   class ChipsSDK {
     version = '1.0.0';
     connector: MockCoreConnector;
@@ -333,6 +335,7 @@ vi.mock('@chips/sdk', () => {
   }
 
   return {
+    ...actual,
     ChipsSDK,
     createSDK: vi.fn().mockResolvedValue(new ChipsSDK()),
     CoreConnector: MockCoreConnector,

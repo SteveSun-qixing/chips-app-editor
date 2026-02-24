@@ -12,17 +12,18 @@ import type {
   ChipsMessageBoxOptions,
   ChipsOpenDialogOptions,
   ChipsSaveDialogOptions,
-  FileReadResult,
 } from '@/types/bridge';
+import {
+  invokeBridge,
+  readBridgeFileAsBytes,
+  requireBridge,
+  type BridgeInvokeError,
+} from '@chips/sdk';
 import type { PluginInitPayload } from '@/types/plugin-init';
-import { decodeBase64ToBytes } from '@/utils/base64';
 import { subscribePluginInit } from '@/utils/plugin-init';
 
-export interface BridgeInvokeError extends Error {
-  code?: string;
-  details?: unknown;
-  cause?: unknown;
-}
+export { invokeBridge };
+export type { BridgeInvokeError };
 
 export interface EditorBridgeClient {
   showOpenFileDialog(options?: ChipsOpenDialogOptions): Promise<string[] | null>;
@@ -35,50 +36,8 @@ export interface EditorBridgeClient {
   warmupPluginContext(): Promise<void>;
 }
 
-const BRIDGE_UNAVAILABLE_CODE = 'BRIDGE_UNAVAILABLE';
-
-function toBridgeError(error: unknown): BridgeInvokeError {
-  if (error instanceof Error) {
-    return error as BridgeInvokeError;
-  }
-
-  if (typeof error === 'object' && error !== null) {
-    const candidate = error as Record<string, unknown>;
-    const message =
-      typeof candidate.message === 'string' ? candidate.message : 'Unknown bridge error';
-    const bridgeError = new Error(message) as BridgeInvokeError;
-    bridgeError.code = typeof candidate.code === 'string' ? candidate.code : undefined;
-    bridgeError.details = candidate.details;
-    bridgeError.cause = error;
-    return bridgeError;
-  }
-
-  const fallback = new Error(String(error)) as BridgeInvokeError;
-  fallback.cause = error;
-  return fallback;
-}
-
-function requireBridge(): ChipsBridgeAPI {
-  if (typeof window === 'undefined' || !window.chips || typeof window.chips.invoke !== 'function') {
-    const error = new Error('window.chips.invoke is unavailable') as BridgeInvokeError;
-    error.code = BRIDGE_UNAVAILABLE_CODE;
-    throw error;
-  }
-
-  return window.chips;
-}
-
-export async function invokeBridge<T>(
-  namespace: string,
-  action: string,
-  params?: unknown,
-): Promise<T> {
-  try {
-    const bridge = requireBridge();
-    return (await bridge.invoke(namespace, action, params)) as T;
-  } catch (error: unknown) {
-    throw toBridgeError(error);
-  }
+function getBridge(): ChipsBridgeAPI {
+  return requireBridge<ChipsBridgeAPI>();
 }
 
 function toErrorMessage(error: unknown): string {
@@ -87,7 +46,7 @@ function toErrorMessage(error: unknown): string {
 
 class EditorBridgeClientImpl implements EditorBridgeClient {
   public async showOpenFileDialog(options?: ChipsOpenDialogOptions): Promise<string[] | null> {
-    const bridge = requireBridge();
+    const bridge = getBridge();
     const defaults: ChipsOpenDialogOptions = {
       title: 'Open',
       filters: [
@@ -101,7 +60,7 @@ class EditorBridgeClientImpl implements EditorBridgeClient {
   }
 
   public async showSaveFileDialog(options?: ChipsSaveDialogOptions): Promise<string | null> {
-    const bridge = requireBridge();
+    const bridge = getBridge();
     const defaults: ChipsSaveDialogOptions = {
       title: 'Save',
       filters: [
@@ -113,39 +72,21 @@ class EditorBridgeClientImpl implements EditorBridgeClient {
   }
 
   public async showMessageBox(options: ChipsMessageBoxOptions): Promise<{ response: number }> {
-    const bridge = requireBridge();
+    const bridge = getBridge();
     return bridge.dialog.showMessageBox(options);
   }
 
   public async readFileAsBytes(path: string): Promise<Uint8Array> {
-    const readResult = await invokeBridge<FileReadResult>('file', 'read', {
-      path,
-      encoding: 'base64',
-      mode: 'buffer',
-    });
-
-    if (!readResult || typeof readResult !== 'object') {
-      throw new Error('Invalid file.read response');
-    }
-
-    if (typeof readResult.content !== 'string') {
-      throw new Error('Invalid file.read content');
-    }
-
-    if (readResult.encoding !== 'base64') {
-      throw new Error(`Unsupported encoding from file.read: ${readResult.encoding}`);
-    }
-
-    return decodeBase64ToBytes(readResult.content);
+    return readBridgeFileAsBytes(path);
   }
 
   public async setWindowTitle(title: string): Promise<void> {
-    const bridge = requireBridge();
+    const bridge = getBridge();
     await bridge.window.setTitle(title);
   }
 
   public async openPlugin(pluginId: string, launchParams?: unknown): Promise<void> {
-    const bridge = requireBridge();
+    const bridge = getBridge();
     await bridge.window.openPlugin(pluginId, launchParams);
   }
 
@@ -155,7 +96,7 @@ class EditorBridgeClientImpl implements EditorBridgeClient {
 
   public async warmupPluginContext(): Promise<void> {
     try {
-      const bridge = requireBridge();
+      const bridge = getBridge();
       await Promise.allSettled([
         bridge.plugin.getSelf(),
         bridge.plugin.list({ type: 'card' }),

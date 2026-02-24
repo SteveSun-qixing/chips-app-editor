@@ -39,6 +39,21 @@ import {
   resolveCardResourceUrl,
   type CardResolvedResource,
 } from '@/services/card-resource-resolver';
+import {
+  createCardRuntimeNonce,
+  isCardRuntimeBridgeRequestMessage,
+  isCardRuntimeBridgeTarget,
+  isCardRuntimeOriginTrusted,
+  matchesCardRuntimeEnvelope,
+  resolveCardRuntimeOrigin,
+  toCardRuntimeTargetOrigin,
+  type CardRuntimeBridgeRequestMessage,
+  type CardRuntimeConfigUpdateMessage,
+  type CardRuntimeEditorCancelMessage,
+  type CardRuntimeEnvelope,
+  type CardRuntimeLanguageEnvelope,
+  type CardRuntimeResizeMessage,
+} from '@chips/sdk/card-runtime';
 
 // ==================== Props ====================
 interface Props {
@@ -187,49 +202,11 @@ const editorState = ref<{
   isFocused: false,
 });
 
-interface IframeBridgeRequestMessage {
-  type: 'bridge-request';
-  pluginId: string;
-  sessionNonce: string;
-  requestNonce: string;
-  requestId: string;
-  namespace: string;
-  action: string;
-  params?: unknown;
-}
-
-interface IframeConfigUpdateMessage {
-  type: 'config-update';
-  pluginId: string;
-  sessionNonce: string;
-  config: Record<string, unknown>;
-  persist?: boolean;
-}
-
-interface IframeEditorCancelMessage {
-  type: 'editor-cancel';
-  pluginId: string;
-  sessionNonce: string;
-}
-
-interface IframeResizeMessage {
-  type: 'resize';
-  pluginId: string;
-  sessionNonce: string;
-  width?: number;
-  height?: number;
-}
-
-interface IframeVocabularyPayload {
-  mode: 'full';
-  vocabulary: Record<string, string>;
-}
-
-interface IframeI18nEnvelope {
-  locale: string;
-  version: string;
-  payload: IframeVocabularyPayload;
-}
+type IframeBridgeRequestMessage = CardRuntimeBridgeRequestMessage;
+type IframeConfigUpdateMessage = CardRuntimeConfigUpdateMessage;
+type IframeEditorCancelMessage = CardRuntimeEditorCancelMessage;
+type IframeResizeMessage = CardRuntimeResizeMessage;
+type IframeI18nEnvelope = CardRuntimeLanguageEnvelope;
 
 function getTargetCard(): CardInfo | null {
   if (props.cardId) {
@@ -284,25 +261,6 @@ async function releaseAllEditorResources(): Promise<void> {
   await Promise.all(resources.map((resource) => releaseCardResourceUrl(resource)));
 }
 
-function generateBridgeNonce(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `nonce-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function resolveIframeOrigin(url: string): string | null {
-  if (!url) {
-    return null;
-  }
-
-  try {
-    return new URL(url, window.location.href).origin;
-  } catch {
-    return null;
-  }
-}
-
 function normalizePermissionToken(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -338,8 +296,8 @@ function trackConsumedRequestNonce(nonce: string): boolean {
 }
 
 function resetIframeSecurityContext(url: string, pluginId: string): void {
-  iframeSessionNonce.value = generateBridgeNonce();
-  iframeTrustedOrigin.value = resolveIframeOrigin(url);
+  iframeSessionNonce.value = createCardRuntimeNonce();
+  iframeTrustedOrigin.value = resolveCardRuntimeOrigin(url);
   iframePermissions.value = new Set();
   iframePermissionsLoaded.value = false;
   iframeVocabularyVersion.value = 'init';
@@ -364,50 +322,20 @@ function clearIframeSecurityContext(): void {
 }
 
 function getIframeTargetOrigin(): string {
-  const trustedOrigin = iframeTrustedOrigin.value;
-  if (trustedOrigin && trustedOrigin !== 'null') {
-    return trustedOrigin;
-  }
-  return '*';
+  return toCardRuntimeTargetOrigin(iframeTrustedOrigin.value);
 }
 
 function isTrustedIframeOrigin(origin: string): boolean {
-  const expectedOrigin = iframeTrustedOrigin.value;
-  if (!expectedOrigin) {
-    return false;
-  }
-
-  if (expectedOrigin === 'null') {
-    return origin === 'null' || origin.startsWith('chips://') || origin === 'file://';
-  }
-
-  if (expectedOrigin.startsWith('chips://') && origin === 'null') {
-    return true;
-  }
-
-  if (expectedOrigin.startsWith('file://') && origin === 'null') {
-    return true;
-  }
-
-  return origin === expectedOrigin;
-}
-
-function isIframeBridgeEnvelope(message: Record<string, unknown>): message is {
-  pluginId: string;
-  sessionNonce: string;
-} {
-  return typeof message.pluginId === 'string' && typeof message.sessionNonce === 'string';
+  return isCardRuntimeOriginTrusted(iframeTrustedOrigin.value, origin);
 }
 
 function isTrustedIframeBridgeEnvelope(message: Record<string, unknown>): boolean {
-  if (!isIframeBridgeEnvelope(message)) {
-    return false;
-  }
+  const expected: CardRuntimeEnvelope = {
+    pluginId: iframePluginId.value,
+    sessionNonce: iframeSessionNonce.value,
+  };
 
-  return (
-    message.pluginId === iframePluginId.value
-    && message.sessionNonce === iframeSessionNonce.value
-  );
+  return matchesCardRuntimeEnvelope(message, expected);
 }
 
 function buildI18nEnvelope(locale: string, vocabulary: Record<string, string>): IframeI18nEnvelope {
@@ -986,6 +914,7 @@ function sendIframeInit(vocabulary: Record<string, string> = iframeVocabulary.va
       bridge: {
         pluginId: iframePluginId.value,
         sessionNonce: iframeSessionNonce.value,
+        ...(iframeTrustedOrigin.value ? { trustedOrigin: iframeTrustedOrigin.value } : {}),
       },
       theme: {
         css: buildThemeCss(),
@@ -1096,9 +1025,7 @@ function postIframeBridgeResponse(
 }
 
 function isValidBridgeTarget(namespace: string, action: string): boolean {
-  const namespacePattern = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
-  const actionPattern = /^[a-zA-Z][a-zA-Z0-9._-]*$/;
-  return namespacePattern.test(namespace) && actionPattern.test(action);
+  return isCardRuntimeBridgeTarget(namespace, action);
 }
 
 async function handleIframeBridgeRequest(message: IframeBridgeRequestMessage): Promise<void> {
@@ -1267,8 +1194,8 @@ function handleIframeMessage(event: MessageEvent): void {
     return;
   }
 
-  if (record.type === 'bridge-request') {
-    void handleIframeBridgeRequest(record as unknown as IframeBridgeRequestMessage);
+  if (isCardRuntimeBridgeRequestMessage(record)) {
+    void handleIframeBridgeRequest(record);
     return;
   }
 

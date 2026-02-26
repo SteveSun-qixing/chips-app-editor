@@ -20,6 +20,7 @@ import { generateId62, generateScopedId } from '@/utils';
 import { initializeEditorI18n, t, setLocale } from '@/services/i18n-service';
 import { initializeSettingsService } from '@/services/settings-service';
 import { resourceService, setWorkspacePaths } from '@/services/resource-service';
+import { subscribeEditorRuntimeEvent } from '@/services/editor-runtime-gateway';
 import { loadBaseCardConfigsFromContent } from '@/core/base-card-content-loader';
 import { requireCardPath } from '@/services/card-path-service';
 import { persistInsertedBaseCard } from '@/services/card-persistence-service';
@@ -29,6 +30,7 @@ import {
   extractWorkspaceRoot,
   extractExternalRoot,
 } from '@/utils/plugin-init';
+import type { PluginInitPayload } from '@/types/plugin-init';
 import yaml from 'yaml';
 
 /** 编辑器状态 Store */
@@ -568,7 +570,7 @@ function handleRetry(): void {
 onMounted(async () => {
   try {
     // 订阅插件初始化事件，从 Host 获取工作区路径和启动文件
-    unsubscribePluginInit = subscribePluginInit((payload) => {
+    unsubscribePluginInit = subscribePluginInit((payload: PluginInitPayload) => {
       const workspaceRoot = extractWorkspaceRoot(payload);
       const externalRoot = extractExternalRoot(payload);
 
@@ -604,10 +606,9 @@ onMounted(async () => {
 
     isReady.value = true;
 
-    // 订阅 Bridge 系统事件，桥接到编辑器内部
-    if (typeof window !== 'undefined' && window.chips) {
+    try {
       bridgeUnsubscribers.push(
-        window.chips.on('theme.changed', (data) => {
+        subscribeEditorRuntimeEvent('theme.changed', (data: unknown) => {
           const payload = data as Record<string, unknown> | null;
           const themeId = typeof payload?.themeId === 'string' ? payload.themeId : null;
           if (themeId) {
@@ -617,7 +618,7 @@ onMounted(async () => {
       );
 
       bridgeUnsubscribers.push(
-        window.chips.on('i18n.languageChanged', (data) => {
+        subscribeEditorRuntimeEvent('language.changed', (data: unknown) => {
           const payload = data as Record<string, unknown> | null;
           const language = typeof payload?.language === 'string' ? payload.language : null;
           if (language) {
@@ -626,6 +627,8 @@ onMounted(async () => {
           }
         })
       );
+    } catch (error) {
+      console.warn('[Chips Editor] Failed to subscribe runtime events:', error);
     }
 
     console.warn('[Chips Editor] 初始化完成');

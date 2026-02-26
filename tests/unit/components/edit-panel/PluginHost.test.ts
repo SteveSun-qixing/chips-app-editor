@@ -11,10 +11,20 @@ import PluginHost from '@/components/edit-panel/PluginHost.vue';
 import { useCardStore, useEditorStore } from '@/core/state';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
 
-const { getEditorRuntimeMock, getLocalPluginVocabularyMock, getCardPluginPermissionsMock } = vi.hoisted(() => ({
+const {
+  getEditorRuntimeMock,
+  getLocalPluginVocabularyMock,
+  getHostPluginVocabularyMock,
+  getCardPluginPermissionsMock,
+} = vi.hoisted(() => ({
   getEditorRuntimeMock: vi.fn(),
   getLocalPluginVocabularyMock: vi.fn(),
+  getHostPluginVocabularyMock: vi.fn(),
   getCardPluginPermissionsMock: vi.fn(),
+}));
+
+const { invokeEditorRuntimeMock } = vi.hoisted(() => ({
+  invokeEditorRuntimeMock: vi.fn(),
 }));
 
 const { resourceServiceMock } = vi.hoisted(() => ({
@@ -26,7 +36,12 @@ const { resourceServiceMock } = vi.hoisted(() => ({
 vi.mock('@/services/plugin-service', () => ({
   getEditorRuntime: getEditorRuntimeMock,
   getLocalPluginVocabulary: getLocalPluginVocabularyMock,
+  getHostPluginVocabulary: getHostPluginVocabularyMock,
   getCardPluginPermissions: getCardPluginPermissionsMock,
+}));
+
+vi.mock('@/services/editor-runtime-gateway', () => ({
+  invokeEditorRuntime: invokeEditorRuntimeMock,
 }));
 
 // Mock DefaultEditor 组件
@@ -73,8 +88,12 @@ describe('PluginHost', () => {
     getEditorRuntimeMock.mockResolvedValue(null);
     getLocalPluginVocabularyMock.mockReset();
     getLocalPluginVocabularyMock.mockResolvedValue(null);
+    getHostPluginVocabularyMock.mockReset();
+    getHostPluginVocabularyMock.mockResolvedValue(null);
     getCardPluginPermissionsMock.mockReset();
     getCardPluginPermissionsMock.mockResolvedValue(new Set());
+    invokeEditorRuntimeMock.mockReset();
+    invokeEditorRuntimeMock.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -699,11 +718,6 @@ describe('PluginHost', () => {
       wrapper = mountComponent({ cardType: 'RichTextCard' });
       await nextTick();
 
-      const invokeMock = vi.fn().mockResolvedValue({});
-      (window as typeof window & { chips?: unknown }).chips = {
-        invoke: invokeMock,
-      };
-
       const postMessage = vi.fn();
       const iframeWindow = {} as Window;
       const vm = wrapper.vm as any;
@@ -727,7 +741,7 @@ describe('PluginHost', () => {
       });
       await nextTick();
 
-      expect(invokeMock).not.toHaveBeenCalled();
+      expect(invokeEditorRuntimeMock).not.toHaveBeenCalled();
       expect(postMessage).not.toHaveBeenCalled();
     });
   });

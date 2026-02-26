@@ -5,13 +5,174 @@
  */
 
 import { vi } from 'vitest';
-import type { ChipsBridgeAPI } from '@/types/bridge';
+import type { ChipsBridgeAPI } from '@chips/sdk';
 
 const eventHandlers = new Map<string, Set<(payload: unknown) => void>>();
+const mockFiles = new Map<string, string>();
+const mockDirectories = new Set<string>();
+
+function normalizePath(path: string): string {
+  if (!path) {
+    return '/';
+  }
+  return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+}
+
+function dirname(path: string): string {
+  const normalized = normalizePath(path);
+  const index = normalized.lastIndexOf('/');
+  if (index <= 0) {
+    return '/';
+  }
+  return normalized.slice(0, index);
+}
+
+function ensureDirectory(path: string): void {
+  const normalized = normalizePath(path);
+  const segments = normalized.split('/').filter(Boolean);
+  let current = '';
+  for (const segment of segments) {
+    current = `${current}/${segment}`;
+    mockDirectories.add(current || '/');
+  }
+}
+
+function listEntries(path: string): Array<{ name: string; type: 'file' | 'directory' }> {
+  const normalized = normalizePath(path);
+  const prefix = normalized === '/' ? '/' : `${normalized}/`;
+  const entries = new Map<string, 'file' | 'directory'>();
+
+  for (const directory of mockDirectories) {
+    if (!directory.startsWith(prefix) || directory === normalized) {
+      continue;
+    }
+    const relative = directory.slice(prefix.length);
+    if (!relative || relative.includes('/')) {
+      continue;
+    }
+    entries.set(relative, 'directory');
+  }
+
+  for (const filePath of mockFiles.keys()) {
+    if (!filePath.startsWith(prefix)) {
+      continue;
+    }
+    const relative = filePath.slice(prefix.length);
+    if (!relative || relative.includes('/')) {
+      continue;
+    }
+    entries.set(relative, 'file');
+  }
+
+  return Array.from(entries.entries()).map(([name, type]) => ({ name, type }));
+}
 
 export function createMockBridge(): ChipsBridgeAPI {
+  mockDirectories.add('/');
+
   return {
-    invoke: vi.fn().mockResolvedValue(undefined),
+    invoke: vi.fn(async (namespace: string, action: string, params?: Record<string, unknown>) => {
+      if (namespace === 'serializer' && action === 'stringifyYaml') {
+        return {
+          text: JSON.stringify(params?.data ?? {}),
+        };
+      }
+
+      if (namespace !== 'file') {
+        return {};
+      }
+
+      if (action === 'exists') {
+        const path = normalizePath(String(params?.path ?? ''));
+        return {
+          exists: mockFiles.has(path) || mockDirectories.has(path),
+        };
+      }
+
+      if (action === 'mkdir') {
+        const path = normalizePath(String(params?.path ?? ''));
+        ensureDirectory(path);
+        return {};
+      }
+
+      if (action === 'write') {
+        const path = normalizePath(String(params?.path ?? ''));
+        ensureDirectory(dirname(path));
+        mockFiles.set(path, String(params?.content ?? ''));
+        return {};
+      }
+
+      if (action === 'read') {
+        const path = normalizePath(String(params?.path ?? ''));
+        const encoding = String(params?.encoding ?? 'utf8');
+        const content = mockFiles.get(path) ?? '';
+        return {
+          content,
+          encoding,
+          size: content.length,
+        };
+      }
+
+      if (action === 'list') {
+        const path = normalizePath(String(params?.path ?? ''));
+        return {
+          entries: listEntries(path),
+        };
+      }
+
+      if (action === 'stat') {
+        const path = normalizePath(String(params?.path ?? ''));
+        if (mockFiles.has(path)) {
+          const content = mockFiles.get(path) ?? '';
+          return {
+            size: content.length,
+            isFile: true,
+            isDirectory: false,
+            modified: new Date().toISOString(),
+            created: new Date().toISOString(),
+          };
+        }
+
+        if (mockDirectories.has(path)) {
+          return {
+            size: 0,
+            isFile: false,
+            isDirectory: true,
+            modified: new Date().toISOString(),
+            created: new Date().toISOString(),
+          };
+        }
+
+        return {
+          size: 0,
+          isFile: false,
+          isDirectory: false,
+          modified: new Date().toISOString(),
+          created: new Date().toISOString(),
+        };
+      }
+
+      if (action === 'delete') {
+        const path = normalizePath(String(params?.path ?? ''));
+        mockFiles.delete(path);
+        mockDirectories.delete(path);
+        return {};
+      }
+
+      if (action === 'copy' || action === 'move') {
+        const source = normalizePath(String(params?.source ?? ''));
+        const target = normalizePath(String(params?.target ?? ''));
+        const content = mockFiles.get(source) ?? '';
+        ensureDirectory(dirname(target));
+        mockFiles.set(target, content);
+        if (action === 'move') {
+          mockFiles.delete(source);
+        }
+        return {};
+      }
+
+      return {};
+    }),
     on: vi.fn((event: string, handler: (payload: unknown) => void) => {
       if (!eventHandlers.has(event)) {
         eventHandlers.set(event, new Set());
@@ -57,12 +218,9 @@ export function createMockBridge(): ChipsBridgeAPI {
       setAlwaysOnTop: vi.fn().mockResolvedValue(undefined),
       openPlugin: vi.fn().mockResolvedValue(undefined),
       getInfo: vi.fn().mockResolvedValue({
-        id: 'mock-window',
-        title: 'Mock',
+        pluginId: 'chips-official.editor',
+        windowId: 1,
         bounds: { x: 0, y: 0, width: 1400, height: 900 },
-        isFullScreen: false,
-        isMaximized: false,
-        isMinimized: false,
       }),
     },
     dialog: {
@@ -81,6 +239,7 @@ export function createMockBridge(): ChipsBridgeAPI {
       get: vi.fn().mockResolvedValue(null),
       getCardPlugin: vi.fn().mockResolvedValue(null),
       getLayoutPlugin: vi.fn().mockResolvedValue(null),
+      getCardRuntimeContext: vi.fn().mockResolvedValue(null),
       resolveFileUrl: vi.fn().mockResolvedValue(''),
     },
     clipboard: {
@@ -117,6 +276,8 @@ export function getMockBridge(): ChipsBridgeAPI {
 
 export function resetMockBridge(): void {
   eventHandlers.clear();
+  mockFiles.clear();
+  mockDirectories.clear();
   if (mockBridgeInstance) {
     mockBridgeInstance = createMockBridge();
     (window as any).chips = mockBridgeInstance;

@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { requestMock, getEditorConnectorMock } = vi.hoisted(() => ({
-  requestMock: vi.fn(),
+const { invokeEditorRuntimeMock, getEditorConnectorMock } = vi.hoisted(() => ({
+  invokeEditorRuntimeMock: vi.fn(),
   getEditorConnectorMock: vi.fn(),
+}));
+
+vi.mock('@/services/editor-runtime-gateway', () => ({
+  invokeEditorRuntime: invokeEditorRuntimeMock,
 }));
 
 vi.mock('@/services/sdk-service', () => ({
@@ -20,27 +24,26 @@ async function loadResourceServiceModule() {
 describe('resource-service copy/move protocol contract', () => {
   beforeEach(() => {
     vi.resetModules();
-    requestMock.mockReset();
+    invokeEditorRuntimeMock.mockReset();
     getEditorConnectorMock.mockReset();
-    requestMock.mockResolvedValue({ success: true });
-    getEditorConnectorMock.mockResolvedValue({ request: requestMock });
+    invokeEditorRuntimeMock.mockResolvedValue({});
+    getEditorConnectorMock.mockResolvedValue({});
   });
 
   it('copy sends source/target fields for absolute paths', async () => {
     const { resourceService, setWorkspacePaths } = await loadResourceServiceModule();
     setWorkspacePaths(defaultWorkspaceRoot, defaultExternalRoot);
 
-    await resourceService.copy('/ProductFinishedProductTestingSpace/TestWorkspace/a.card', '/ProductFinishedProductTestingSpace/TestWorkspace/b.card');
+    await resourceService.copy(
+      '/ProductFinishedProductTestingSpace/TestWorkspace/a.card',
+      '/ProductFinishedProductTestingSpace/TestWorkspace/b.card'
+    );
 
-    expect(requestMock).toHaveBeenCalledWith({
-      service: 'file',
-      method: 'copy',
-      payload: {
-        source: '/ProductFinishedProductTestingSpace/TestWorkspace/a.card',
-        target: '/ProductFinishedProductTestingSpace/TestWorkspace/b.card',
-      },
+    expect(invokeEditorRuntimeMock).toHaveBeenCalledWith('file', 'copy', {
+      source: '/ProductFinishedProductTestingSpace/TestWorkspace/a.card',
+      target: '/ProductFinishedProductTestingSpace/TestWorkspace/b.card',
     });
-    const payload = requestMock.mock.calls[0]?.[0]?.payload as Record<string, unknown>;
+    const payload = invokeEditorRuntimeMock.mock.calls[0]?.[2] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('sourcePath');
     expect(payload).not.toHaveProperty('destPath');
   });
@@ -51,13 +54,9 @@ describe('resource-service copy/move protocol contract', () => {
 
     await resourceService.copy('TestWorkspace/source.txt', 'TestWorkspace/target.txt');
 
-    expect(requestMock).toHaveBeenCalledWith({
-      service: 'file',
-      method: 'copy',
-      payload: {
-        source: '/ProductFinishedProductTestingSpace/TestWorkspace/source.txt',
-        target: '/ProductFinishedProductTestingSpace/TestWorkspace/target.txt',
-      },
+    expect(invokeEditorRuntimeMock).toHaveBeenCalledWith('file', 'copy', {
+      source: '/ProductFinishedProductTestingSpace/TestWorkspace/source.txt',
+      target: '/ProductFinishedProductTestingSpace/TestWorkspace/target.txt',
     });
   });
 
@@ -67,13 +66,9 @@ describe('resource-service copy/move protocol contract', () => {
 
     await resourceService.copy('ExternalEnvironment/source.txt', 'ExternalEnvironment/target.txt');
 
-    expect(requestMock).toHaveBeenCalledWith({
-      service: 'file',
-      method: 'copy',
-      payload: {
-        source: '/ProductFinishedProductTestingSpace/ExternalEnvironment/source.txt',
-        target: '/ProductFinishedProductTestingSpace/ExternalEnvironment/target.txt',
-      },
+    expect(invokeEditorRuntimeMock).toHaveBeenCalledWith('file', 'copy', {
+      source: '/ProductFinishedProductTestingSpace/ExternalEnvironment/source.txt',
+      target: '/ProductFinishedProductTestingSpace/ExternalEnvironment/target.txt',
     });
   });
 
@@ -84,27 +79,22 @@ describe('resource-service copy/move protocol contract', () => {
     await expect(resourceService.copy('relative-source.txt', '/tmp/target.txt')).rejects.toThrow(
       '[ResourceService] Path must resolve to an absolute path: relative-source.txt'
     );
-    expect(requestMock).not.toHaveBeenCalled();
+    expect(invokeEditorRuntimeMock).not.toHaveBeenCalled();
   });
 
-  it('copy throws backend error when file.copy fails', async () => {
+  it('copy throws runtime error when file.copy fails', async () => {
     const { resourceService, setWorkspacePaths } = await loadResourceServiceModule();
     setWorkspacePaths(defaultWorkspaceRoot, defaultExternalRoot);
-    requestMock.mockResolvedValueOnce({ success: false, error: 'copy denied' });
+    invokeEditorRuntimeMock.mockRejectedValueOnce({
+      code: 'SERVICE_COPY_DENIED',
+      message: 'copy denied',
+      retryable: false,
+    });
 
-    await expect(resourceService.copy('TestWorkspace/source.txt', 'TestWorkspace/target.txt')).rejects.toThrow(
-      'copy denied'
-    );
-  });
-
-  it('copy falls back to default error message when backend error is empty', async () => {
-    const { resourceService, setWorkspacePaths } = await loadResourceServiceModule();
-    setWorkspacePaths(defaultWorkspaceRoot, defaultExternalRoot);
-    requestMock.mockResolvedValueOnce({ success: false });
-
-    await expect(resourceService.copy('TestWorkspace/source.txt', 'TestWorkspace/target.txt')).rejects.toThrow(
-      'Copy failed'
-    );
+    await expect(resourceService.copy('TestWorkspace/source.txt', 'TestWorkspace/target.txt')).rejects.toMatchObject({
+      code: 'SERVICE_COPY_DENIED',
+      message: 'copy denied',
+    });
   });
 
   it('move sends source/target fields for file.move requests', async () => {
@@ -113,36 +103,27 @@ describe('resource-service copy/move protocol contract', () => {
 
     await resourceService.move('TestWorkspace/from-folder/a.txt', 'TestWorkspace/to-folder/a.txt');
 
-    expect(requestMock).toHaveBeenCalledWith({
-      service: 'file',
-      method: 'move',
-      payload: {
-        source: '/ProductFinishedProductTestingSpace/TestWorkspace/from-folder/a.txt',
-        target: '/ProductFinishedProductTestingSpace/TestWorkspace/to-folder/a.txt',
-      },
+    expect(invokeEditorRuntimeMock).toHaveBeenCalledWith('file', 'move', {
+      source: '/ProductFinishedProductTestingSpace/TestWorkspace/from-folder/a.txt',
+      target: '/ProductFinishedProductTestingSpace/TestWorkspace/to-folder/a.txt',
     });
-    const payload = requestMock.mock.calls[0]?.[0]?.payload as Record<string, unknown>;
+    const payload = invokeEditorRuntimeMock.mock.calls[0]?.[2] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('sourcePath');
     expect(payload).not.toHaveProperty('destPath');
   });
 
-  it('move throws backend error when file.move fails', async () => {
+  it('move throws runtime error when file.move fails', async () => {
     const { resourceService, setWorkspacePaths } = await loadResourceServiceModule();
     setWorkspacePaths(defaultWorkspaceRoot, defaultExternalRoot);
-    requestMock.mockResolvedValueOnce({ success: false, error: 'move denied' });
+    invokeEditorRuntimeMock.mockRejectedValueOnce({
+      code: 'SERVICE_MOVE_DENIED',
+      message: 'move denied',
+      retryable: false,
+    });
 
-    await expect(resourceService.move('TestWorkspace/source.txt', 'TestWorkspace/target.txt')).rejects.toThrow(
-      'move denied'
-    );
-  });
-
-  it('move falls back to default error message when backend error is empty', async () => {
-    const { resourceService, setWorkspacePaths } = await loadResourceServiceModule();
-    setWorkspacePaths(defaultWorkspaceRoot, defaultExternalRoot);
-    requestMock.mockResolvedValueOnce({ success: false });
-
-    await expect(resourceService.move('TestWorkspace/source.txt', 'TestWorkspace/target.txt')).rejects.toThrow(
-      'Move failed'
-    );
+    await expect(resourceService.move('TestWorkspace/source.txt', 'TestWorkspace/target.txt')).rejects.toMatchObject({
+      code: 'SERVICE_MOVE_DENIED',
+      message: 'move denied',
+    });
   });
 });

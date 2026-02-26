@@ -25,11 +25,17 @@ import { useCardStore, useEditorStore, useUIStore } from '@/core/state';
 import type { CardInfo } from '@/core/state/stores/card';
 import DefaultEditor from './DefaultEditor.vue';
 import type { EditorPlugin } from './types';
-import { getEditorRuntime, getLocalPluginVocabulary, getCardPluginPermissions } from '@/services/plugin-service';
+import {
+  getCardPluginPermissions,
+  getEditorRuntime,
+  getHostPluginVocabulary,
+  getLocalPluginVocabulary,
+} from '@/services/plugin-service';
 import { t } from '@/services/i18n-service';
 import { requireCardPath, resolveCardPath } from '@/services/card-path-service';
 import { saveCardToWorkspace } from '@/services/card-persistence-service';
 import { resourceService } from '@/services/resource-service';
+import { invokeEditorRuntime } from '@/services/editor-runtime-gateway';
 import {
   createRequestNonceTracker,
   generateBridgeNonce,
@@ -220,27 +226,13 @@ async function fetchHostPluginVocabulary(
   pluginId: string,
   locale: string
 ): Promise<Record<string, string> | null> {
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
-  }
-
   try {
-    const response = await window.chips.invoke('i18n', 'getPluginVocabulary', {
-      pluginId,
-      locale,
-    });
-
-    const directVocabulary = toStringRecord(response);
-    if (directVocabulary) {
-      return directVocabulary;
+    const runtimeVocabulary = await getHostPluginVocabulary(pluginId, locale);
+    if (!runtimeVocabulary) {
+      return null;
     }
 
-    if (response && typeof response === 'object' && !Array.isArray(response)) {
-      const nestedVocabulary = toStringRecord((response as { vocabulary?: unknown }).vocabulary);
-      if (nestedVocabulary) {
-        return nestedVocabulary;
-      }
-    }
+    return runtimeVocabulary.vocabulary;
   } catch {
     return null;
   }
@@ -582,18 +574,15 @@ async function handleImageCardConfigChange(newConfig: Record<string, unknown>): 
         console.error('[PluginHost] Missing card path, skip pending resource write', {
           cardId: targetCard.id,
         });
-      } else if (typeof window === 'undefined' || !window.chips) {
-        console.error('[PluginHost] Failed to save resources: window.chips is unavailable');
       } else {
         for (const [relativeFilePath, file] of Object.entries(pendingFiles)) {
           try {
             const arrayBuffer = await file.arrayBuffer();
-            const chipsUri = `chips://card/${cardPath}/${relativeFilePath}`;
-            await window.chips.invoke('resource', 'write', {
-              uri: chipsUri,
-              data: arrayBuffer,
-            });
-            console.warn(`[PluginHost] Resource saved via chips://: ${chipsUri}`);
+            const normalizedCardPath = cardPath.replace(/\/+$/, '');
+            const normalizedRelativePath = relativeFilePath.replace(/^\/+/, '');
+            const targetPath = `${normalizedCardPath}/${normalizedRelativePath}`;
+            await resourceService.writeBinary(targetPath, arrayBuffer);
+            console.warn(`[PluginHost] Resource saved: ${targetPath}`);
           } catch (error) {
             console.error(`[PluginHost] Failed to save resource: ${relativeFilePath}`, error);
           }
@@ -711,7 +700,12 @@ async function sendIframeLanguageChange(): Promise<void> {
   postIframeLanguageChange(locale, vocabulary);
 }
 
-function toBridgeErrorPayload(error: unknown): { code: string; message: string; details?: unknown } {
+function toBridgeErrorPayload(error: unknown): {
+  code: string;
+  message: string;
+  details?: unknown;
+  retryable?: boolean;
+} {
   if (typeof error === 'object' && error !== null) {
     const candidate = error as Record<string, unknown>;
     const message =
@@ -722,6 +716,7 @@ function toBridgeErrorPayload(error: unknown): { code: string; message: string; 
       code,
       message,
       ...(candidate.details !== undefined ? { details: candidate.details } : {}),
+      ...(typeof candidate.retryable === 'boolean' ? { retryable: candidate.retryable } : {}),
     };
   }
 
@@ -747,6 +742,7 @@ function postIframeBridgeResponse(
       code: string;
       message: string;
       details?: unknown;
+      retryable?: boolean;
     };
   }
 ): void {
@@ -836,19 +832,8 @@ async function handleIframeBridgeRequest(message: IframeBridgeRequestMessage): P
     return;
   }
 
-  if (typeof window === 'undefined' || !window.chips) {
-    postIframeBridgeResponse(message.requestId, {
-      requestNonce: message.requestNonce,
-      error: {
-        code: 'BRIDGE_UNAVAILABLE',
-        message: 'window.chips is unavailable',
-      },
-    });
-    return;
-  }
-
   try {
-    const result = await window.chips.invoke(
+    const result = await invokeEditorRuntime(
       message.namespace,
       message.action,
       message.params

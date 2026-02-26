@@ -192,6 +192,14 @@ export class FileService {
     this.events = events;
   }
 
+  private async ensureWorkspaceReady(): Promise<ReturnType<typeof useWorkspaceService>> {
+    const workspaceService = useWorkspaceService();
+    if (!workspaceService.isInitialized.value) {
+      await workspaceService.initialize();
+    }
+    return workspaceService;
+  }
+
   destroy(): void {
     this.clipboard = null;
     this.expandedPaths.clear();
@@ -215,10 +223,7 @@ export class FileService {
   }
 
   async getFileTree(): Promise<FileInfo[]> {
-    const workspaceService = useWorkspaceService();
-    if (!workspaceService.isInitialized.value) {
-      await workspaceService.initialize();
-    }
+    const workspaceService = await this.ensureWorkspaceReady();
     const wsFiles = workspaceService.files.value;
     return wsFiles.map((file) => convertWorkspaceFile(file, this.expandedPaths));
   }
@@ -235,7 +240,7 @@ export class FileService {
     }
 
     const name = stripExtension(options.name.trim(), '.card');
-    const workspaceService = useWorkspaceService();
+    const workspaceService = await this.ensureWorkspaceReady();
     try {
       const file = await workspaceService.createCard(
         name,
@@ -261,7 +266,7 @@ export class FileService {
     }
 
     const name = stripExtension(options.name.trim(), '.box');
-    const workspaceService = useWorkspaceService();
+    const workspaceService = await this.ensureWorkspaceReady();
     try {
       const file = await workspaceService.createBox(name, options.layout, options.parentPath);
       const fileInfo = convertWorkspaceFile(file, this.expandedPaths);
@@ -281,7 +286,7 @@ export class FileService {
       return { success: false, error: 'error.invalid_filename', errorCode: 'VAL-1001' };
     }
 
-    const workspaceService = useWorkspaceService();
+    const workspaceService = await this.ensureWorkspaceReady();
     try {
       const file = await workspaceService.createFolder(options.name.trim(), options.parentPath);
       const fileInfo = convertWorkspaceFile(file, this.expandedPaths);
@@ -301,7 +306,7 @@ export class FileService {
   }
 
   async deleteFile(path: string): Promise<FileOperationResult> {
-    const workspaceService = useWorkspaceService();
+    const workspaceService = await this.ensureWorkspaceReady();
     const tree = await this.getFileTree();
     const target = flattenFiles(tree).find((file) => file.path === path);
 
@@ -327,7 +332,7 @@ export class FileService {
       return { success: false, error: 'error.invalid_filename', errorCode: 'VAL-1001' };
     }
 
-    const workspaceService = useWorkspaceService();
+    const workspaceService = await this.ensureWorkspaceReady();
     const tree = await this.getFileTree();
     const target = flattenFiles(tree).find((file) => file.path === path);
 

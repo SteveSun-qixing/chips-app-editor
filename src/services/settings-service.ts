@@ -12,7 +12,8 @@
  */
 
 import type { ThemeMetadata } from '@chips/sdk';
-import { getEditorConnector, getEditorSdk } from './sdk-service';
+import { getEditorSdk } from './sdk-service';
+import { invokeEditorRuntime } from './editor-runtime-gateway';
 import { setLocale as setEditorLocale } from './i18n-service';
 import { useSettingsStore } from '@/core/state';
 import { useUIStore, useEditorStore } from '@/core/state';
@@ -297,17 +298,16 @@ async function restorePersistedSettings(
   settingsStore: ReturnType<typeof useSettingsStore>,
 ): Promise<void> {
   try {
-    const connector = await getEditorConnector();
-    const response = await connector.request<Record<string, unknown>>({
-      service: 'config',
-      method: 'get',
-      payload: {
+    const response = await invokeEditorRuntime<{ value?: unknown }>(
+      'config',
+      'get',
+      {
         key: SETTINGS_CONFIG_KEY,
         scope: 'user',
-      },
-    });
-    if (response.success && response.data && typeof response.data === 'object') {
-      settingsStore.importAll(response.data as Record<string, unknown>);
+      }
+    );
+    if (response && typeof response.value === 'object' && response.value !== null) {
+      settingsStore.importAll(response.value as Record<string, unknown>);
     }
   } catch {
     // 配置读取失败时使用默认设置
@@ -325,16 +325,11 @@ function schedulePersistSettings(): void {
 
 async function persistSettings(): Promise<void> {
   try {
-    const connector = await getEditorConnector();
     const settingsStore = useSettingsStore();
-    await connector.request({
-      service: 'config',
-      method: 'set',
-      payload: {
-        key: SETTINGS_CONFIG_KEY,
-        scope: 'user',
-        value: settingsStore.exportAll(),
-      },
+    await invokeEditorRuntime('config', 'set', {
+      key: SETTINGS_CONFIG_KEY,
+      scope: 'user',
+      value: settingsStore.exportAll(),
     });
   } catch {
     // 持久化失败不阻塞 UI

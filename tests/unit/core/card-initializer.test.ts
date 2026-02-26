@@ -6,8 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { mockConnectorRequest, mockTranslate } = vi.hoisted(() => ({
-  mockConnectorRequest: vi.fn(),
+const { mockInvokeEditorRuntime, mockTranslate } = vi.hoisted(() => ({
+  mockInvokeEditorRuntime: vi.fn(),
   mockTranslate: vi.fn(
     (key: string, params?: Record<string, string | number>): string => {
       if (!params) {
@@ -22,10 +22,8 @@ const { mockConnectorRequest, mockTranslate } = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock('@/services/sdk-service', () => ({
-  getEditorConnector: vi.fn(async () => ({
-    request: mockConnectorRequest,
-  })),
+vi.mock('@/services/editor-runtime-gateway', () => ({
+  invokeEditorRuntime: mockInvokeEditorRuntime,
 }));
 
 vi.mock('@/services/i18n-service', () => ({
@@ -145,35 +143,23 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
   return result;
 }
 
-function setupConnectorRequestMock(): void {
-  mockConnectorRequest.mockClear();
-  mockConnectorRequest.mockImplementation(
-    async (request: {
-      service: string;
-      method: string;
-      payload?: Record<string, unknown>;
-    }) => {
-      if (request.service === 'serializer' && request.method === 'stringifyYaml') {
+function setupInvokeRuntimeMock(): void {
+  mockInvokeEditorRuntime.mockClear();
+  mockInvokeEditorRuntime.mockImplementation(
+    async (namespace: string, action: string, params?: Record<string, unknown>) => {
+      if (namespace === 'serializer' && action === 'stringifyYaml') {
         return {
-          success: true,
-          data: {
-            text: JSON.stringify(request.payload?.data ?? {}),
-          },
+          text: JSON.stringify(params?.data ?? {}),
         };
       }
 
-      if (request.service === 'file' && request.method === 'exists') {
+      if (namespace === 'file' && action === 'exists') {
         return {
-          success: true,
-          data: {
-            exists: false,
-          },
+          exists: false,
         };
       }
 
-      return {
-        success: true,
-      };
+      return {};
     }
   );
 }
@@ -190,7 +176,7 @@ describe('CardInitializer（卡片初始化器）', () => {
   };
 
   beforeEach(() => {
-    setupConnectorRequestMock();
+    setupInvokeRuntimeMock();
     mockTranslate.mockClear();
 
     // 重置单例
@@ -461,11 +447,10 @@ describe('CardInitializer（卡片初始化器）', () => {
         const result = await initializer.createCard('a1B2c3D4e5', '测试卡片');
 
         expect(result.success).toBe(true);
-        const serializeCalls = mockConnectorRequest.mock.calls.filter(
-          ([request]) =>
-            request &&
-            request.service === 'serializer' &&
-            request.method === 'stringifyYaml'
+        const serializeCalls = mockInvokeEditorRuntime.mock.calls.filter(
+          ([namespace, action]) =>
+            namespace === 'serializer' &&
+            action === 'stringifyYaml'
         );
         expect(serializeCalls.length).toBe(2);
       });
@@ -478,11 +463,10 @@ describe('CardInitializer（卡片初始化器）', () => {
         });
 
         expect(result.success).toBe(true);
-        const serializeCalls = mockConnectorRequest.mock.calls.filter(
-          ([request]) =>
-            request &&
-            request.service === 'serializer' &&
-            request.method === 'stringifyYaml'
+        const serializeCalls = mockInvokeEditorRuntime.mock.calls.filter(
+          ([namespace, action]) =>
+            namespace === 'serializer' &&
+            action === 'stringifyYaml'
         );
         expect(serializeCalls.length).toBe(3);
       });
@@ -960,7 +944,7 @@ describe('CardInitializer（卡片初始化器）', () => {
 
 describe('辅助功能测试', () => {
   beforeEach(() => {
-    setupConnectorRequestMock();
+    setupInvokeRuntimeMock();
     mockTranslate.mockClear();
   });
 

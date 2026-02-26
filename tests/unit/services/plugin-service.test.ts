@@ -3,6 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const registerPlugin = vi.fn();
 const enablePlugin = vi.fn();
 
+const {
+  listMock,
+  getCardPluginMock,
+  getCardRuntimeContextMock,
+  resolveFileUrlMock,
+} = vi.hoisted(() => ({
+  listMock: vi.fn(),
+  getCardPluginMock: vi.fn(),
+  getCardRuntimeContextMock: vi.fn(),
+  resolveFileUrlMock: vi.fn(),
+}));
+
 vi.mock('@/services/sdk-service', () => ({
   getEditorSdk: vi.fn(async () => ({
     registerPlugin,
@@ -12,48 +24,66 @@ vi.mock('@/services/sdk-service', () => ({
   })),
 }));
 
+vi.mock('@/services/editor-runtime-gateway', () => ({
+  getEditorPluginHook: () => ({
+    list: listMock,
+    getCardPlugin: getCardPluginMock,
+    getCardRuntimeContext: getCardRuntimeContextMock,
+    resolveFileUrl: resolveFileUrlMock,
+  }),
+}));
+
 import {
   __resetPluginServiceForTests,
   getCardPluginPermissions,
+  getHostPluginVocabulary,
   getLocalPluginVocabulary,
   getEditorComponent,
   getEditorRuntime,
   getRegisteredPlugins,
 } from '@/services/plugin-service';
 
-function installBridgeMock(overrides?: {
-  list?: ReturnType<typeof vi.fn>;
-  getCardPlugin?: ReturnType<typeof vi.fn>;
-  resolveFileUrl?: ReturnType<typeof vi.fn>;
-}): void {
-  (window as typeof window & { chips?: unknown }).chips = {
-    plugin: {
-      list:
-        overrides?.list ??
-        vi.fn().mockResolvedValue([
-          {
-            id: 'chips-official.rich-text-card',
-            name: 'Rich Text Card',
-            version: '1.0.0',
-            capabilities: {
-              cardType: 'RichTextCard',
-            },
-          },
-        ]),
-      getCardPlugin:
-        overrides?.getCardPlugin ??
-        vi.fn().mockResolvedValue({
-          pluginId: 'chips-official.rich-text-card',
-          rendererPath: 'dist/renderer/index.html',
-          editorPath: 'dist/editor/index.html',
-        }),
-      resolveFileUrl:
-        overrides?.resolveFileUrl ??
-        vi.fn().mockResolvedValue(
-          'chips://plugin/chips-official.rich-text-card/dist/editor/index.html'
-        ),
+function resetRuntimeMocks(): void {
+  listMock.mockReset();
+  getCardPluginMock.mockReset();
+  getCardRuntimeContextMock.mockReset();
+  resolveFileUrlMock.mockReset();
+
+  listMock.mockResolvedValue([
+    {
+      id: 'chips-official.rich-text-card',
+      name: 'Rich Text Card',
+      version: '1.0.0',
+      capabilities: {
+        cardType: 'RichTextCard',
+      },
     },
-  };
+  ]);
+
+  getCardPluginMock.mockResolvedValue({
+    pluginId: 'chips-official.rich-text-card',
+    rendererPath: 'dist/renderer/index.html',
+    editorPath: 'dist/editor/index.html',
+  });
+
+  getCardRuntimeContextMock.mockResolvedValue({
+    pluginId: 'chips-official.rich-text-card',
+    cardType: 'RichTextCard',
+    rendererPath: 'dist/renderer/index.html',
+    rendererUrl: 'https://plugins.local/renderer/index.html',
+    editorPath: 'dist/editor/index.html',
+    editorUrl: 'https://plugins.local/editor/index.html',
+    permissions: ['resource.fetch'],
+    locale: 'zh-CN',
+    vocabularyVersion: 3,
+    vocabulary: {
+      'toolbar.bold': '加粗',
+    },
+  });
+
+  resolveFileUrlMock.mockImplementation(async (pluginId: string, relativePath: string) => {
+    return `chips://plugin/${pluginId}/${relativePath}`;
+  });
 }
 
 describe('plugin-service', () => {
@@ -62,6 +92,7 @@ describe('plugin-service', () => {
     enablePlugin.mockReset();
     __resetPluginServiceForTests();
     vi.restoreAllMocks();
+    resetRuntimeMocks();
   });
 
   afterEach(() => {
@@ -69,8 +100,6 @@ describe('plugin-service', () => {
   });
 
   it('returns iframe runtime for html editor entry', async () => {
-    installBridgeMock();
-
     const runtime = await getEditorRuntime('RichTextCard');
 
     expect(runtime).toBeTruthy();
@@ -79,23 +108,17 @@ describe('plugin-service', () => {
   });
 
   it('returns null component for iframe runtime', async () => {
-    installBridgeMock();
-
     const component = await getEditorComponent('RichTextCard');
     expect(component).toBeNull();
   });
 
   it('supports legacy plugin id as card type alias', async () => {
-    installBridgeMock();
-
     const runtime = await getEditorRuntime('chips-official.rich-text-card');
     expect(runtime?.mode).toBe('iframe');
     expect(runtime?.pluginId).toBe('chips-official.rich-text-card');
   });
 
   it('maps discovered cardTypes from plugin capabilities.cardType', async () => {
-    installBridgeMock();
-
     await getEditorRuntime('RichTextCard');
     const plugins = getRegisteredPlugins();
 
@@ -103,17 +126,15 @@ describe('plugin-service', () => {
     expect(plugins[0]?.cardTypes).toEqual(['RichTextCard']);
   });
 
-  it('returns null when bridge cannot resolve card plugin entry', async () => {
-    installBridgeMock({
-      getCardPlugin: vi.fn().mockResolvedValue(null),
-    });
+  it('returns null when runtime cannot resolve card plugin entry', async () => {
+    getCardPluginMock.mockResolvedValue(null);
 
     const runtime = await getEditorRuntime('UnknownCard');
     expect(runtime).toBeNull();
   });
 
   it('retries card plugin lookup after first miss', async () => {
-    const getCardPlugin = vi.fn()
+    getCardPluginMock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
         pluginId: 'chips-official.rich-text-card',
@@ -121,24 +142,25 @@ describe('plugin-service', () => {
         editorPath: 'dist/editor/index.html',
       });
 
-    installBridgeMock({ getCardPlugin });
-
     const runtime = await getEditorRuntime('RichTextCard');
     expect(runtime?.mode).toBe('iframe');
-    expect(getCardPlugin).toHaveBeenCalledTimes(2);
+    expect(getCardPluginMock).toHaveBeenCalledTimes(2);
   });
 
-  it('returns null when bridge is unavailable', async () => {
-    (window as typeof window & { chips?: unknown }).chips = undefined;
+  it('loads host runtime vocabulary from plugin runtime context', async () => {
+    const result = await getHostPluginVocabulary('chips-official.rich-text-card', 'zh-CN');
 
-    const runtime = await getEditorRuntime('RichTextCard');
-    expect(runtime).toBeNull();
+    expect(result).toEqual({
+      locale: 'zh-CN',
+      vocabularyVersion: 3,
+      vocabulary: {
+        'toolbar.bold': '加粗',
+      },
+    });
   });
 
   it('loads local vocabulary from plugin locale file', async () => {
-    installBridgeMock({
-      resolveFileUrl: vi.fn().mockResolvedValue('https://plugins.local/chips-official.rich-text-card/locales/vocabulary.yaml'),
-    });
+    resolveFileUrlMock.mockResolvedValue('https://plugins.local/chips-official.rich-text-card/locales/vocabulary.yaml');
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -157,9 +179,7 @@ vocabulary:
   });
 
   it('loads plugin permissions from manifest', async () => {
-    installBridgeMock({
-      resolveFileUrl: vi.fn().mockResolvedValue('https://plugins.local/chips-official.rich-text-card/manifest.yaml'),
-    });
+    resolveFileUrlMock.mockResolvedValue('https://plugins.local/chips-official.rich-text-card/manifest.yaml');
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

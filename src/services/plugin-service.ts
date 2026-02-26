@@ -8,15 +8,26 @@
  */
 
 import type { Component } from 'vue';
-import type { ChipsSDK, PluginRegistration } from '@chips/sdk';
+import type {
+  ChipsCardPluginRuntimeContext,
+  ChipsSDK,
+  PluginRegistration,
+} from '@chips/sdk';
 import { parse as parseYaml } from 'yaml';
 import { getEditorSdk } from './sdk-service';
+import { getEditorPluginHook } from './editor-runtime-gateway';
 
 /** 卡片插件信息（从 Bridge API 获取） */
 interface CardPluginInfo {
   pluginId: string;
   rendererPath: string;
   editorPath: string;
+}
+
+interface RuntimeVocabularyResult {
+  locale: string;
+  vocabularyVersion: number;
+  vocabulary: Record<string, string>;
 }
 
 export interface EditorRuntime {
@@ -190,12 +201,9 @@ async function resolvePluginEntryPath(pluginId: string, entryPath: string): Prom
     return toFileUrl(entryPath);
   }
 
-  if (typeof window === 'undefined' || !window.chips) {
-    return null;
-  }
-
   try {
-    return await window.chips.plugin.resolveFileUrl(pluginId, entryPath);
+    const plugin = getEditorPluginHook();
+    return await plugin.resolveFileUrl(pluginId, entryPath);
   } catch (error) {
     console.warn(
       `[PluginService] Failed to resolve plugin file URL for "${pluginId}" and "${entryPath}":`,
@@ -337,14 +345,8 @@ async function discoverCardPlugins(options?: { force?: boolean }): Promise<Edito
   pluginIdToCardType.clear();
 
   try {
-    if (typeof window === 'undefined' || !window.chips) {
-      console.warn('[PluginService] Bridge API not available, no plugins discovered');
-      pluginsDiscovered = true;
-      discoveredPlugins = [];
-      return discoveredPlugins;
-    }
-
-    const plugins = await window.chips.plugin.list({ type: 'card' });
+    const plugin = getEditorPluginHook();
+    const plugins = await plugin.list({ type: 'card' });
 
     discoveredPlugins = plugins.map((plugin) => {
       const cardType = resolvePluginCardType(plugin);
@@ -385,11 +387,8 @@ async function getCardPluginInfo(cardType: string, options?: { force?: boolean }
   }
 
   try {
-    if (typeof window === 'undefined' || !window.chips) {
-      return null;
-    }
-
-    const info = await window.chips.plugin.getCardPlugin(cardType);
+    const plugin = getEditorPluginHook();
+    const info = await plugin.getCardPlugin(cardType);
     if (info) {
       cardPluginCache.set(cardType, info);
     }
@@ -398,6 +397,14 @@ async function getCardPluginInfo(cardType: string, options?: { force?: boolean }
     console.warn(`[PluginService] Failed to get card plugin for type "${cardType}":`, error);
     return null;
   }
+}
+
+async function getCardRuntimeContext(
+  cardType: string,
+  locale?: string
+): Promise<ChipsCardPluginRuntimeContext | null> {
+  const plugin = getEditorPluginHook();
+  return plugin.getCardRuntimeContext(cardType, locale);
 }
 
 async function registerPluginsToSdk(sdk: ChipsSDK, plugins: EditorPluginDefinition[]): Promise<void> {
@@ -595,6 +602,38 @@ export async function getLocalPluginVocabulary(
   }
 
   return null;
+}
+
+export async function getHostPluginVocabulary(
+  pluginId: string,
+  locale: string
+): Promise<RuntimeVocabularyResult | null> {
+  if (!pluginId || !locale) {
+    return null;
+  }
+
+  const normalizedCardType = normalizeCardType(pluginId);
+
+  try {
+    const runtimeContext = await getCardRuntimeContext(normalizedCardType, locale);
+    if (!runtimeContext || runtimeContext.pluginId !== pluginId) {
+      return null;
+    }
+
+    return {
+      locale: runtimeContext.locale,
+      vocabularyVersion: runtimeContext.vocabularyVersion,
+      vocabulary: runtimeContext.vocabulary,
+    };
+  } catch (error) {
+    const runtimeError = error as { code?: string };
+    if (typeof runtimeError.code === 'string' && runtimeError.code.includes('NOT_FOUND')) {
+      return null;
+    }
+
+    console.warn('[PluginService] Failed to read runtime vocabulary context:', error);
+    return null;
+  }
 }
 
 /**

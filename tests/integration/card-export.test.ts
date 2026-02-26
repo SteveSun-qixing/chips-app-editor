@@ -7,8 +7,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ChipsSDK } from '@chips/sdk';
 import * as fs from 'fs/promises';
-import * as path from 'path';
-import { tmpdir } from 'os';
+import * as path from 'node:path';
+import { tmpdir } from 'node:os';
 import JSZip from 'jszip';
 
 describe('Card Export Integration', () => {

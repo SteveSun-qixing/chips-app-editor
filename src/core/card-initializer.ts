@@ -25,7 +25,7 @@ import type { EventEmitter } from './event-manager';
 import { createEventEmitter } from './event-manager';
 import { resourceService } from '@/services/resource-service';
 import { t as translate } from '@/services/i18n-service';
-import { getEditorConnector } from '@/services/sdk-service';
+import { invokeEditorRuntime } from '@/services/editor-runtime-gateway';
 import { createBaseCardContentDocument } from './base-card-content-loader';
 import { generateId62, isValidId62 } from '@/utils';
 
@@ -153,6 +153,7 @@ const I18N_KEYS = {
   ERROR_CARD_EXISTS: 'editor.card_initializer.error.card_exists',
   SUCCESS_CARD_CREATED: 'editor.card_initializer.success.card_created',
 } as const;
+type CardInitializerI18nKey = typeof I18N_KEYS[keyof typeof I18N_KEYS];
 
 // ========== 工具函数 ==========
 
@@ -336,18 +337,17 @@ export function createCardInitializer(
    * @param data - 待序列化数据
    */
   async function stringifyYaml(data: unknown): Promise<string> {
-    const connector = await getEditorConnector();
-    const response = await connector.request<{ text?: string }>({
-      service: 'serializer',
-      method: 'stringifyYaml',
-      payload: { data },
-    });
+    const response = await invokeEditorRuntime<{ text?: string }>(
+      'serializer',
+      'stringifyYaml',
+      { data }
+    );
 
-    if (!response.success || !response.data || typeof response.data.text !== 'string') {
-      throw new Error(response.error || 'Serializer stringifyYaml failed');
+    if (!response || typeof response.text !== 'string') {
+      throw new Error('Serializer stringifyYaml failed');
     }
 
-    return response.data.text;
+    return response.text;
   }
 
   /**
@@ -414,7 +414,7 @@ export function createCardInitializer(
     initialBasicCard?: BasicCardConfig
   ): Promise<CardInitResult> {
     const createdFiles: string[] = [];
-    let errorI18nKey = I18N_KEYS.ERROR_CREATE_DIRECTORY_FAILED;
+    let errorI18nKey: CardInitializerI18nKey = I18N_KEYS.ERROR_CREATE_DIRECTORY_FAILED;
     
     try {
       // 1. 验证输入参数

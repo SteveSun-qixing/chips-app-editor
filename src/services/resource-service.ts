@@ -1,18 +1,16 @@
 /**
  * 资源服务
  * @module services/resource-service
- * @description 统一封装资源管理器与转换能力（通过 Bridge API 路由）
+ * @description 统一封装资源管理器与转换能力（通过 Runtime Client 路由）
  *
- * 在新架构中，所有文件操作通过 SDK CoreConnector 路由到 Bridge API。
+ * 在新架构中，所有文件操作通过 Runtime Client 路由到 Host 服务。
  * 路径不再添加硬编码前缀，由调用方（workspace-service）负责传入正确路径。
  * 工作区路径在运行时通过插件启动参数设置。
  */
 
 import {
-  ResourceManager,
   Logger,
   ConfigManager,
-  EventBus,
   ConversionAPI,
   type ConversionResult,
   type HTMLConversionOptions,
@@ -20,13 +18,12 @@ import {
   type PDFConversionOptions,
 } from '@chips/sdk';
 import { getEditorConnector } from './sdk-service';
+import { invokeEditorRuntime } from './editor-runtime-gateway';
 
 const logger = new Logger('EditorResourceService');
 const config = new ConfigManager();
-const eventBus = new EventBus();
 
 let initialized = false;
-let _resourceManager: ResourceManager | null = null;
 let conversionApi: ConversionAPI | null = null;
 
 /** 运行时工作区路径，通过 setWorkspacePaths 设置 */
@@ -126,9 +123,15 @@ async function ensureInitialized(): Promise<void> {
   if (initialized) return;
   await config.initialize();
   const connector = await getEditorConnector();
-  _resourceManager = new ResourceManager(connector, logger, eventBus);
   conversionApi = new ConversionAPI(connector, logger, config);
   initialized = true;
+}
+
+async function invokeFileRuntime<TResult = unknown>(
+  action: string,
+  payload: Record<string, unknown>
+): Promise<TResult> {
+  return invokeEditorRuntime<TResult>('file', action, payload);
 }
 
 export const resourceService = {
@@ -142,38 +145,24 @@ export const resourceService = {
   async readText(path: string): Promise<string> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (await getEditorConnector()).request<{
+    const response = await invokeFileRuntime<{
       content: string;
       encoding: string;
       size: number;
-    }>({
-      service: 'file',
-      method: 'read',
-      payload: { path: resolvedPath, encoding: 'utf8' },
-    });
-    if (!response.success || !response.data) {
-      throw new Error(response.error || 'Read failed');
-    }
-    return response.data.content ?? '';
+    }>('read', { path: resolvedPath, encoding: 'utf8' });
+    return response.content ?? '';
   },
 
   async readBinary(path: string): Promise<ArrayBuffer> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (await getEditorConnector()).request<{
+    const response = await invokeFileRuntime<{
       content: string;
       encoding: string;
       size: number;
-    }>({
-      service: 'file',
-      method: 'read',
-      payload: { path: resolvedPath, encoding: 'base64', mode: 'buffer' },
-    });
-    if (!response.success || !response.data) {
-      throw new Error(response.error || 'Read failed');
-    }
+    }>('read', { path: resolvedPath, encoding: 'base64', mode: 'buffer' });
     // Decode base64 to ArrayBuffer
-    const binary = atob(response.data.content);
+    const binary = atob(response.content);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
@@ -184,14 +173,12 @@ export const resourceService = {
   async writeText(path: string, content: string): Promise<void> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (await getEditorConnector()).request({
-      service: 'file',
-      method: 'write',
-      payload: { path: resolvedPath, content, encoding: 'utf8', createDirs: true },
+    await invokeFileRuntime('write', {
+      path: resolvedPath,
+      content,
+      encoding: 'utf8',
+      createDirs: true,
     });
-    if (!response.success) {
-      throw new Error(response.error || 'Write failed');
-    }
   },
 
   async writeBinary(path: string, content: ArrayBuffer): Promise<void> {
@@ -204,67 +191,43 @@ export const resourceService = {
       binary += String.fromCharCode(bytes[i]!);
     }
     const base64Content = btoa(binary);
-    const response = await (await getEditorConnector()).request({
-      service: 'file',
-      method: 'write',
-      payload: { path: resolvedPath, content: base64Content, encoding: 'base64', createDirs: true },
+    await invokeFileRuntime('write', {
+      path: resolvedPath,
+      content: base64Content,
+      encoding: 'base64',
+      createDirs: true,
     });
-    if (!response.success) {
-      throw new Error(response.error || 'Write failed');
-    }
   },
 
   async ensureDir(path: string): Promise<void> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (await getEditorConnector()).request({
-      service: 'file',
-      method: 'mkdir',
-      payload: { path: resolvedPath, recursive: true },
-    });
-    if (!response.success && response.error) {
-      throw new Error(response.error);
-    }
+    await invokeFileRuntime('mkdir', { path: resolvedPath, recursive: true });
   },
 
   async exists(path: string): Promise<boolean> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (await getEditorConnector()).request<{ exists: boolean }>({
-      service: 'file',
-      method: 'exists',
-      payload: { path: resolvedPath },
-    });
-    return response.success && response.data?.exists === true;
+    const response = await invokeFileRuntime<{ exists: boolean }>('exists', { path: resolvedPath });
+    return response.exists === true;
   },
 
   async delete(path: string): Promise<void> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (await getEditorConnector()).request({
-      service: 'file',
-      method: 'delete',
-      payload: { path: resolvedPath, force: true },
+    await invokeFileRuntime('delete', {
+      path: resolvedPath,
+      force: true,
     });
-    if (!response.success) {
-      throw new Error(response.error || 'Delete failed');
-    }
   },
 
   async list(path: string): Promise<string[]> {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
-    const response = await (
-      await getEditorConnector()
-    ).request<{ entries: Array<{ name: string; type: string }> }>({
-      service: 'file',
-      method: 'list',
-      payload: { path: resolvedPath },
+    const response = await invokeFileRuntime<{ entries?: Array<{ name: string; type: string }> }>('list', {
+      path: resolvedPath,
     });
-    if (!response.success || !response.data) {
-      return [];
-    }
-    return response.data.entries?.map((e) => e.name) ?? [];
+    return response.entries?.map((entry) => entry.name) ?? [];
   },
 
   async metadata(path: string): Promise<{
@@ -278,38 +241,25 @@ export const resourceService = {
     await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     // First check if path exists
-    const existsResponse = await (await getEditorConnector()).request<{ exists: boolean }>({
-      service: 'file',
-      method: 'exists',
-      payload: { path: resolvedPath },
-    });
-    if (!existsResponse.success || !existsResponse.data?.exists) {
+    const existsResponse = await invokeFileRuntime<{ exists: boolean }>('exists', { path: resolvedPath });
+    if (!existsResponse.exists) {
       return { path: resolvedPath, exists: false, isDirectory: false, isFile: false };
     }
     // Then get stat info
-    const response = await (
-      await getEditorConnector()
-    ).request<{
+    const response = await invokeFileRuntime<{
       size: number;
       isFile: boolean;
       isDirectory: boolean;
       modified: string;
       created: string;
-    }>({
-      service: 'file',
-      method: 'stat',
-      payload: { path: resolvedPath },
-    });
-    if (!response.success || !response.data) {
-      return { path: resolvedPath, exists: true, isDirectory: false, isFile: false };
-    }
+    }>('stat', { path: resolvedPath });
     return {
       path: resolvedPath,
       exists: true,
-      isDirectory: response.data.isDirectory,
-      isFile: response.data.isFile,
-      size: response.data.size,
-      modified: response.data.modified,
+      isDirectory: response.isDirectory,
+      isFile: response.isFile,
+      size: response.size,
+      modified: response.modified,
     };
   },
 
@@ -399,27 +349,19 @@ export const resourceService = {
     await ensureInitialized();
     const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
     const resolvedDestPath = resolveRequiredBridgePath(destPath);
-    const response = await (await getEditorConnector()).request({
-      service: 'file',
-      method: 'copy',
-      payload: { source: resolvedSourcePath, target: resolvedDestPath },
+    await invokeFileRuntime('copy', {
+      source: resolvedSourcePath,
+      target: resolvedDestPath,
     });
-    if (!response.success) {
-      throw new Error(response.error || 'Copy failed');
-    }
   },
 
   async move(sourcePath: string, destPath: string): Promise<void> {
     await ensureInitialized();
     const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
     const resolvedDestPath = resolveRequiredBridgePath(destPath);
-    const response = await (await getEditorConnector()).request({
-      service: 'file',
-      method: 'move',
-      payload: { source: resolvedSourcePath, target: resolvedDestPath },
+    await invokeFileRuntime('move', {
+      source: resolvedSourcePath,
+      target: resolvedDestPath,
     });
-    if (!response.success) {
-      throw new Error(response.error || 'Move failed');
-    }
   },
 };

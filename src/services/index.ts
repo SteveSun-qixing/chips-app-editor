@@ -10,3 +10,4 @@ export * from './i18n-service';
 export * from './plugin-service';
 export * from './settings-service';
 export * from './card-persistence-service';
+export * from './editor-runtime-gateway';

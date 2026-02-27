@@ -1,0 +1,89 @@
+/* ============================================================
+ * CoverPanel 样式
+ * 从 CoverPanel.vue 迁移
+ * ============================================================ */
+
+.cover-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chips-spacing-lg, 20px);
+}
+
+.cover-panel__desc {
+  font-size: var(--chips-font-size-sm, 14px);
+  color: var(--chips-color-text-secondary, #6b7280);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.cover-panel__options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chips-spacing-sm, 8px);
+}
+
+.cover-panel__option-card {
+  width: 100%;
+  padding: 0;
+  border: 2px solid var(--chips-color-border, #e5e7eb);
+  border-radius: var(--chips-radius-md, 8px);
+  background: var(--chips-color-surface, #ffffff);
+  cursor: pointer;
+  transition: border-color var(--chips-transition-fast, 150ms ease),
+    background-color var(--chips-transition-fast, 150ms ease);
+  text-align: left;
+}
+
+.cover-panel__option-card:hover {
+  border-color: var(--chips-color-primary, #3b82f6);
+  background: color-mix(in srgb, var(--chips-color-primary) 3%, transparent);
+}
+
+.cover-panel__option-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--chips-spacing-md, 16px);
+  padding: var(--chips-spacing-md, 16px);
+}
+
+.cover-panel__option-icon {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.cover-panel__option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cover-panel__option-title {
+  font-size: var(--chips-font-size-sm, 14px);
+  font-weight: var(--chips-font-weight-medium, 500);
+  color: var(--chips-color-text, #111827);
+}
+
+.cover-panel__option-desc {
+  font-size: var(--chips-font-size-xs, 12px);
+  color: var(--chips-color-text-secondary, #6b7280);
+}
+
+/* 提示信息 */
+.cover-panel__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--chips-spacing-sm, 8px);
+  padding: var(--chips-spacing-sm, 12px);
+  background: color-mix(in srgb, var(--chips-color-primary) 10%, transparent);
+  border-radius: var(--chips-radius-md, 8px);
+}
+
+.cover-panel__hint-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.cover-panel__hint .chips-alert__message {
+  font-size: var(--chips-font-size-xs, 12px);
+  color: var(--chips-color-text-secondary, #6b7280);
+}

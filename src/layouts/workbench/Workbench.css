@@ -1,0 +1,19 @@
+/* ==================== 工作台容器 ==================== */
+.workbench {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    background: var(--chips-color-background, #fafafa);
+    overflow: hidden;
+}
+
+/* ==================== 过渡动画 ==================== */
+.workbench .side-panel {
+    transition: width var(--chips-transition-medium, 0.25s) ease;
+}
+
+/* ==================== 主区域自适应 ==================== */
+.workbench .main-area {
+    flex: 1;
+    min-width: 300px;
+}

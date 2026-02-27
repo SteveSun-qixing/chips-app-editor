@@ -1,0 +1,75 @@
+.dock-item {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--chips-radius-md, 8px);
+    background: var(--chips-color-surface-variant, #f0f2f5);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 0.2s, border-color 0.2s, opacity 0.2s;
+    user-select: none;
+}
+
+/* 最小化状态 - 半透明 */
+.dock-item--minimized {
+    opacity: 0.5;
+}
+
+.dock-item--minimized:hover {
+    opacity: 1;
+}
+
+.dock-item:hover {
+    transform: scale(1.12) translateY(-4px);
+    background: var(--chips-color-primary-subtle, rgba(37, 99, 235, 0.08));
+    border-color: var(--chips-color-primary-light, rgba(59, 130, 246, 0.3));
+}
+
+.dock-item:active {
+    transform: scale(1.05) translateY(-2px);
+}
+
+.dock-item__icon {
+    font-size: 26px;
+    line-height: 1;
+    transition: transform 0.2s;
+}
+
+.dock-item:hover .dock-item__icon {
+    transform: scale(1.1);
+}
+
+.dock-item__tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    padding: 6px 10px;
+    background: var(--chips-color-surface-elevated, #333333);
+    color: var(--chips-color-text-on-dark, #ffffff);
+    border-radius: var(--chips-radius-sm, 4px);
+    font-size: var(--chips-font-size-sm, 13px);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 10;
+}
+
+.dock-item:hover .dock-item__tooltip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+/* 深色主题适配 */
+:global(.dark) .dock-item {
+    background: var(--chips-color-surface-variant-dark, #2a2a2a);
+}
+
+:global(.dark) .dock-item:hover {
+    background: var(--chips-color-primary-light-dark, rgba(59, 130, 246, 0.2));
+}

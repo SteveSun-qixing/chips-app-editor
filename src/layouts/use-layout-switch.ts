@@ -1,11 +1,13 @@
 /**
- * 布局切换 Hook
+ * 布局切换工具
  * @module layouts/use-layout-switch
- * @description 提供布局切换功能，支持在无限画布和工作台布局之间平滑切换
+ * @description 提供布局切换功能（框架无关实现）
+ *
+ * 注意：此模块同时被服务层和组件调用，
+ * 因此实现为纯函数 + getState()，不使用 React Hook。
  */
 
-import { ref, computed, nextTick, type ComputedRef, type Ref } from 'vue';
-import { useEditorStore, useUIStore } from '@/core/state';
+import { getEditorStore, getUIStore } from '@/core/state';
 import type { LayoutType, WindowConfig } from '@/types';
 
 /**
@@ -25,17 +27,13 @@ export interface LayoutSwitchOptions {
 }
 
 /**
- * 布局切换返回类型
+ * 布局切换返回类型（框架无关）
  */
 export interface LayoutSwitchReturn {
-  /** 当前布局类型 */
-  currentLayout: ComputedRef<LayoutType>;
+  /** 获取当前布局类型 */
+  getCurrentLayout: () => LayoutType;
   /** 是否正在切换 */
-  isSwitching: Ref<boolean>;
-  /** 是否为无限画布布局 */
-  isInfiniteCanvas: ComputedRef<boolean>;
-  /** 是否为工作台布局 */
-  isWorkbench: ComputedRef<boolean>;
+  isSwitching: () => boolean;
   /** 切换到指定布局 */
   switchTo: (layout: LayoutType) => Promise<void>;
   /** 切换到无限画布 */
@@ -44,8 +42,8 @@ export interface LayoutSwitchReturn {
   switchToWorkbench: () => Promise<void>;
   /** 切换布局（在两种布局之间切换） */
   toggleLayout: () => Promise<void>;
-  /** 保存的窗口状态 */
-  savedWindowState: Ref<WindowConfig[]>;
+  /** 获取保存的窗口状态 */
+  getSavedWindowState: () => WindowConfig[];
 }
 
 /** 默认选项 */
@@ -53,180 +51,139 @@ const DEFAULT_OPTIONS: Required<LayoutSwitchOptions> = {
   enableTransition: true,
   transitionDuration: 300,
   preserveCardState: true,
-  onBeforeSwitch: () => {},
-  onAfterSwitch: () => {},
+  onBeforeSwitch: () => { },
+  onAfterSwitch: () => { },
 };
 
 /**
- * 布局切换 Hook
+ * 创建布局切换控制器
+ *
  * @param options - 切换选项
- * @returns 布局切换控制方法和状态
- * 
+ * @returns 布局切换控制方法
+ *
  * @example
  * ```typescript
- * const { 
- *   currentLayout,
- *   isSwitching,
- *   toggleLayout,
- *   switchToCanvas,
- *   switchToWorkbench,
- * } = useLayoutSwitch({
+ * const layoutSwitch = createLayoutSwitch({
  *   enableTransition: true,
- *   preserveCardState: true,
- *   onAfterSwitch: (from, to) => {
- *     console.warn(`Switched from ${from} to ${to}`);
- *   }
+ *   onAfterSwitch: (from, to) => console.log(`${from} -> ${to}`),
  * });
+ *
+ * await layoutSwitch.switchToCanvas();
  * ```
  */
-export function useLayoutSwitch(
-  options: LayoutSwitchOptions = {}
+export function createLayoutSwitch(
+  options: LayoutSwitchOptions = {},
 ): LayoutSwitchReturn {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const editorStore = useEditorStore();
-  const uiStore = useUIStore();
+  let switching = false;
+  let savedWindowState: WindowConfig[] = [];
 
-  /** 是否正在切换 */
-  const isSwitching = ref(false);
+  function getCurrentLayout(): LayoutType {
+    return getEditorStore().getState().currentLayout;
+  }
 
-  /** 保存的窗口状态（用于布局切换时恢复） */
-  const savedWindowState = ref<WindowConfig[]>([]);
+  function isSwitching(): boolean {
+    return switching;
+  }
 
-  /** 当前布局类型 */
-  const currentLayout = computed(() => editorStore.currentLayout);
+  function getSavedWindowState(): WindowConfig[] {
+    return savedWindowState;
+  }
 
-  /** 是否为无限画布布局 */
-  const isInfiniteCanvas = computed(() => currentLayout.value === 'infinite-canvas');
-
-  /** 是否为工作台布局 */
-  const isWorkbench = computed(() => currentLayout.value === 'workbench');
-
-  /**
-   * 保存当前窗口状态
-   */
   function saveWindowState(): void {
     if (opts.preserveCardState) {
-      savedWindowState.value = [...uiStore.windowList];
+      savedWindowState = [...getUIStore().getState().windowList];
     }
   }
 
-  /**
-   * 恢复窗口状态
-   */
   function restoreWindowState(): void {
-    if (opts.preserveCardState && savedWindowState.value.length > 0) {
-      // 清除当前窗口
+    if (opts.preserveCardState && savedWindowState.length > 0) {
+      const uiStore = getUIStore();
       uiStore.clearWindows();
-      
-      // 恢复保存的窗口
-      for (const window of savedWindowState.value) {
-        uiStore.addWindow({ ...window });
+      for (const w of savedWindowState) {
+        uiStore.addWindow({ ...w });
       }
-      
-      // 恢复焦点窗口
-      const lastFocused = savedWindowState.value.find(
-        w => w.id === uiStore.focusedWindowId
-      );
+      const focusedId = getUIStore().getState().focusedWindowId;
+      const lastFocused = savedWindowState.find((w) => w.id === focusedId);
       if (lastFocused) {
         uiStore.focusWindow(lastFocused.id);
       }
     }
   }
 
-  /**
-   * 执行布局切换
-   * @param targetLayout - 目标布局
-   */
   async function performSwitch(targetLayout: LayoutType): Promise<void> {
-    const fromLayout = currentLayout.value;
+    const editorStore = getEditorStore();
+    const fromLayout = getCurrentLayout();
 
-    // 如果目标布局与当前布局相同，不执行切换
-    if (fromLayout === targetLayout) {
-      return;
-    }
+    if (fromLayout === targetLayout) return;
 
-    isSwitching.value = true;
+    switching = true;
 
     try {
-      // 切换前回调
       await opts.onBeforeSwitch(fromLayout, targetLayout);
-
-      // 保存当前窗口状态
       saveWindowState();
 
-      // 等待下一帧以确保 DOM 更新
-      await nextTick();
-
-      // 如果启用过渡动画，添加过渡类
-      if (opts.enableTransition) {
+      // 过渡动画
+      if (opts.enableTransition && typeof document !== 'undefined') {
         document.body.classList.add('layout-transitioning');
       }
 
-      // 执行布局切换
       editorStore.setLayout(targetLayout);
 
-      // 等待过渡完成
       if (opts.enableTransition) {
-        await new Promise(resolve => setTimeout(resolve, opts.transitionDuration));
-        document.body.classList.remove('layout-transitioning');
+        await new Promise((resolve) => setTimeout(resolve, opts.transitionDuration));
+        if (typeof document !== 'undefined') {
+          document.body.classList.remove('layout-transitioning');
+        }
       }
 
-      // 恢复窗口状态
-      await nextTick();
+      // 等待一帧再恢复窗口状态
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       restoreWindowState();
 
-      // 切换后回调
       await opts.onAfterSwitch(fromLayout, targetLayout);
-
     } catch (error) {
       console.error('Layout switch failed:', error);
-      // 发生错误时恢复原布局
       editorStore.setLayout(fromLayout);
     } finally {
-      isSwitching.value = false;
+      switching = false;
     }
   }
 
-  /**
-   * 切换到指定布局
-   * @param layout - 目标布局
-   */
   async function switchTo(layout: LayoutType): Promise<void> {
-    if (isSwitching.value) return;
+    if (switching) return;
     await performSwitch(layout);
   }
 
-  /**
-   * 切换到无限画布
-   */
   async function switchToCanvas(): Promise<void> {
     await switchTo('infinite-canvas');
   }
 
-  /**
-   * 切换到工作台
-   */
   async function switchToWorkbench(): Promise<void> {
     await switchTo('workbench');
   }
 
-  /**
-   * 切换布局（在两种布局之间切换）
-   */
   async function toggleLayout(): Promise<void> {
-    const targetLayout: LayoutType = isInfiniteCanvas.value ? 'workbench' : 'infinite-canvas';
-    await switchTo(targetLayout);
+    const target: LayoutType =
+      getCurrentLayout() === 'infinite-canvas' ? 'workbench' : 'infinite-canvas';
+    await switchTo(target);
   }
 
   return {
-    currentLayout,
+    getCurrentLayout,
     isSwitching,
-    isInfiniteCanvas,
-    isWorkbench,
     switchTo,
     switchToCanvas,
     switchToWorkbench,
     toggleLayout,
-    savedWindowState,
+    getSavedWindowState,
   };
+}
+
+/**
+ * 兼容旧接口的工厂函数
+ * @deprecated 使用 createLayoutSwitch 替代
+ */
+export function useLayoutSwitch(options: LayoutSwitchOptions = {}): LayoutSwitchReturn {
+  return createLayoutSwitch(options);
 }

@@ -1,12 +1,18 @@
 /**
- * Pinia Store 统一导出
+ * 状态管理 Store 统一导出
  * @module core/state/stores
+ *
+ * 每个域 Store 提供两种调用接口：
+ * - `get*Store()` — 非组件调用（服务层、初始化逻辑）
+ * - `use*Store(selector)` — React 组件调用（自动订阅 + 精细化重渲染）
  */
 
-export { useEditorStore } from './editor';
+// Editor Store
+export { getEditorStore, useEditorStore } from './editor';
 export type { EditorStoreState, EditorStore } from './editor';
 
-export { useCardStore } from './card';
+// Card Store
+export { getCardStore, useCardStore } from './card';
 export type {
   CardStoreState,
   CardStore,
@@ -16,8 +22,10 @@ export type {
   Card,
 } from './card';
 
-export { useUIStore } from './ui';
+// UI Store
+export { getUIStore, useUIStore } from './ui';
 export type { UIStoreState, UIStore, DockPosition } from './ui';
 
-export { useSettingsStore } from './settings';
+// Settings Store
+export { getSettingsStore, useSettingsStore } from './settings';
 export type { SettingsStoreState, SettingsStore } from './settings';

@@ -1,0 +1,8 @@
+.desktop-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    /* 桌面层本身不占空间，内容通过绝对定位放置 */
+}

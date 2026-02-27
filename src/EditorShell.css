@@ -1,0 +1,131 @@
+/**
+ * 编辑器壳层样式
+ * 从 App.vue <style scoped> 迁移
+ */
+
+#chips-editor {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--chips-color-background, #f0f2f5);
+}
+
+/* 加载状态 */
+.loading-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--chips-spacing-md, 16px);
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--chips-color-border, #e0e0e0);
+  border-top-color: var(--chips-color-primary, #3b82f6);
+  border-radius: 50%;
+  animation: chips-spin 1s linear infinite;
+}
+
+@keyframes chips-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  color: var(--chips-color-text-secondary, #666666);
+  font-size: var(--chips-font-size-sm, 14px);
+}
+
+/* 错误状态 */
+.error-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--chips-spacing-sm, 8px);
+  padding: var(--chips-spacing-lg, 24px);
+}
+
+.error-title {
+  color: var(--chips-color-error, #ef4444);
+  font-size: var(--chips-font-size-lg, 18px);
+  font-weight: var(--chips-font-weight-medium, 500);
+}
+
+.error-message {
+  color: var(--chips-color-text-secondary, #666666);
+  text-align: center;
+  max-width: 400px;
+}
+
+.retry-button {
+  margin-top: var(--chips-spacing-md, 16px);
+  padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-lg, 24px);
+  background-color: var(--chips-color-primary, #3b82f6);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--chips-radius-md, 6px);
+  font-weight: var(--chips-font-weight-medium, 500);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.retry-button:hover {
+  background-color: var(--chips-color-primary-dark, #2563eb);
+}
+
+/* 未知布局回退 */
+.unknown-layout {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--chips-color-text-secondary, #666666);
+}
+
+/* 布局占位符（阶段05前临时使用） */
+.layout-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 24px;
+  color: var(--chips-color-text-secondary, #888);
+}
+
+.layout-placeholder-sub {
+  font-size: 14px;
+  opacity: 0.6;
+}
+
+.settings-dialog-placeholder {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 10000;
+  font-size: 24px;
+  color: #fff;
+}
+
+.settings-dialog-placeholder button {
+  padding: 8px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+}

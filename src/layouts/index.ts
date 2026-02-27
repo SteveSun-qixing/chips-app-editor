@@ -37,8 +37,7 @@ export type {
 } from './workbench';
 
 // 布局切换
-export { default as LayoutSwitcher } from './LayoutSwitcher.vue';
-export { useLayoutSwitch } from './use-layout-switch';
+export { createLayoutSwitch, useLayoutSwitch } from './use-layout-switch';
 export type {
   LayoutSwitchOptions,
   LayoutSwitchReturn,

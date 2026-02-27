@@ -1,10 +1,11 @@
 /**
  * 编辑器状态管理 Store
  * @module core/state/stores/editor
- * @description 管理编辑器整体状态
+ * @description 管理编辑器整体状态（框架无关实现）
  */
 
-import { defineStore } from 'pinia';
+import { createStore } from '../store-core';
+import { useStore } from '../use-store';
 import type { EditorState, LayoutType } from '@/types';
 
 /**
@@ -31,196 +32,198 @@ export interface EditorStoreState {
   locale: string;
 }
 
-/**
- * 编辑器状态 Store
- * 
- * 负责管理编辑器的整体状态，包括：
- * - 编辑器生命周期状态（idle、initializing、ready、error、destroyed）
- * - 布局配置
- * - SDK 连接状态
- * - 自动保存配置
- * - 错误状态
- * 
- * @example
- * ```typescript
- * const editorStore = useEditorStore();
- * 
- * // 检查编辑器是否就绪
- * if (editorStore.isReady) {
- *   // 执行操作
- * }
- * 
- * // 设置布局
- * editorStore.setLayout('workbench');
- * 
- * // 标记有未保存的更改
- * editorStore.markUnsaved();
- * ```
- */
-export const useEditorStore = defineStore('editor', {
-  state: (): EditorStoreState => ({
+// ─── Store 实例 ───────────────────────────────────────────
+
+const editorStore = createStore<EditorStoreState>({
+  state: 'idle',
+  currentLayout: 'infinite-canvas',
+  isConnected: false,
+  debug: false,
+  autoSaveInterval: 30000,
+  lastSaveTime: null,
+  hasUnsavedChanges: false,
+  error: null,
+  locale: 'zh-CN',
+});
+
+// ─── Getters（纯函数，从 state 派生） ─────────────────────
+
+function _isReady(s: EditorStoreState): boolean {
+  return s.state === 'ready';
+}
+
+function _isInitializing(s: EditorStoreState): boolean {
+  return s.state === 'initializing';
+}
+
+function _hasError(s: EditorStoreState): boolean {
+  return s.error !== null;
+}
+
+function _isDestroyed(s: EditorStoreState): boolean {
+  return s.state === 'destroyed';
+}
+
+function _canOperate(s: EditorStoreState): boolean {
+  return s.state === 'ready' && s.isConnected;
+}
+
+function _errorMessage(s: EditorStoreState): string | null {
+  return s.error?.message ?? null;
+}
+
+// ─── Actions ──────────────────────────────────────────────
+
+function setState(newState: EditorState): void {
+  editorStore.setState({ state: newState });
+}
+
+function setLayout(layout: LayoutType): void {
+  editorStore.setState({ currentLayout: layout });
+}
+
+function setConnected(connected: boolean): void {
+  editorStore.setState({ isConnected: connected });
+}
+
+function setDebug(debug: boolean): void {
+  editorStore.setState({ debug });
+}
+
+function setAutoSaveInterval(interval: number): void {
+  editorStore.setState({ autoSaveInterval: interval });
+}
+
+function setLocale(locale: string): void {
+  editorStore.setState({ locale });
+}
+
+function markUnsaved(): void {
+  editorStore.setState({ hasUnsavedChanges: true });
+}
+
+function markSaved(): void {
+  editorStore.setState({ hasUnsavedChanges: false, lastSaveTime: Date.now() });
+}
+
+function setError(error: Error | null): void {
+  if (error) {
+    editorStore.setState({ error, state: 'error' });
+  } else {
+    editorStore.setState({ error: null });
+  }
+}
+
+function clearError(): void {
+  const s = editorStore.getState();
+  const updates: Partial<EditorStoreState> = { error: null };
+  if (s.state === 'error') {
+    updates.state = 'ready';
+  }
+  editorStore.setState(updates);
+}
+
+function reset(): void {
+  editorStore.setState({
     state: 'idle',
     currentLayout: 'infinite-canvas',
     isConnected: false,
-    debug: false,
-    autoSaveInterval: 30000,
-    lastSaveTime: null,
     hasUnsavedChanges: false,
+    lastSaveTime: null,
     error: null,
-    locale: 'zh-CN',
-  }),
+  });
+}
 
-  getters: {
-    /**
-     * 编辑器是否就绪
-     */
-    isReady: (state): boolean => state.state === 'ready',
+function initialize(options: Partial<EditorStoreState> = {}): void {
+  const updates: Partial<EditorStoreState> = { state: 'initializing' };
+  if (options.debug !== undefined) updates.debug = options.debug;
+  if (options.currentLayout) updates.currentLayout = options.currentLayout;
+  if (options.autoSaveInterval !== undefined) updates.autoSaveInterval = options.autoSaveInterval;
+  if (options.locale) updates.locale = options.locale;
+  editorStore.setState(updates);
+}
 
-    /**
-     * 编辑器是否正在初始化
-     */
-    isInitializing: (state): boolean => state.state === 'initializing',
+// ─── 导出对象：非组件调用 ─────────────────────────────────
 
-    /**
-     * 编辑器是否有错误
-     */
-    hasError: (state): boolean => state.error !== null,
+export type EditorStore = {
+  getState: () => Readonly<EditorStoreState>;
+  setState: (newState: EditorState) => void;
+  setLayout: (layout: LayoutType) => void;
+  setConnected: (connected: boolean) => void;
+  setDebug: (debug: boolean) => void;
+  setAutoSaveInterval: (interval: number) => void;
+  setLocale: (locale: string) => void;
+  markUnsaved: () => void;
+  markSaved: () => void;
+  setError: (error: Error | null) => void;
+  clearError: () => void;
+  reset: () => void;
+  initialize: (options?: Partial<EditorStoreState>) => void;
+  // Getters
+  isReady: (s: EditorStoreState) => boolean;
+  isInitializing: (s: EditorStoreState) => boolean;
+  hasError: (s: EditorStoreState) => boolean;
+  isDestroyed: (s: EditorStoreState) => boolean;
+  canOperate: (s: EditorStoreState) => boolean;
+  errorMessage: (s: EditorStoreState) => string | null;
+};
 
-    /**
-     * 编辑器是否已销毁
-     */
-    isDestroyed: (state): boolean => state.state === 'destroyed',
+/**
+ * 获取 Editor Store 实例（非组件调用）
+ *
+ * @example
+ * ```typescript
+ * const store = getEditorStore();
+ * store.setLayout('workbench');
+ * const state = store.getState();
+ * ```
+ */
+export function getEditorStore() {
+  return {
+    getState: editorStore.getState,
+    setState,
+    setLayout,
+    setConnected,
+    setDebug,
+    setAutoSaveInterval,
+    setLocale,
+    markUnsaved,
+    markSaved,
+    setError,
+    clearError,
+    reset,
+    initialize,
+    isReady: _isReady,
+    isInitializing: _isInitializing,
+    hasError: _hasError,
+    isDestroyed: _isDestroyed,
+    canOperate: _canOperate,
+    errorMessage: _errorMessage,
+  };
+}
 
-    /**
-     * 是否可以执行操作
-     */
-    canOperate: (state): boolean => state.state === 'ready' && state.isConnected,
+/**
+ * React Hook：使用 Editor Store（组件调用）
+ *
+ * @param selector - 状态选择器
+ * @returns 选择器返回的状态片段
+ *
+ * @example
+ * ```tsx
+ * function LayoutButton() {
+ *   const layout = useEditorStore(s => s.currentLayout);
+ *   return <button>{layout}</button>;
+ * }
+ * ```
+ */
+export function useEditorStore(): Readonly<EditorStoreState>;
+export function useEditorStore<U>(selector: (state: Readonly<EditorStoreState>) => U): U;
+export function useEditorStore<U>(selector?: (state: Readonly<EditorStoreState>) => U): U | Readonly<EditorStoreState> {
+  if (!selector) {
+    return useStore(editorStore, (state) => state);
+  }
+  return useStore(editorStore, selector);
+}
 
-    /**
-     * 获取错误消息
-     */
-    errorMessage: (state): string | null => state.error?.message ?? null,
-  },
-
-  actions: {
-    /**
-     * 设置编辑器状态
-     * @param newState - 新的编辑器状态
-     */
-    setState(newState: EditorState): void {
-      this.state = newState;
-    },
-
-    /**
-     * 设置布局
-     * @param layout - 布局类型
-     */
-    setLayout(layout: LayoutType): void {
-      this.currentLayout = layout;
-    },
-
-    /**
-     * 设置连接状态
-     * @param connected - 是否已连接
-     */
-    setConnected(connected: boolean): void {
-      this.isConnected = connected;
-    },
-
-    /**
-     * 设置调试模式
-     * @param debug - 是否启用调试
-     */
-    setDebug(debug: boolean): void {
-      this.debug = debug;
-    },
-
-    /**
-     * 设置自动保存间隔
-     * @param interval - 间隔时间（毫秒），0 表示禁用
-     */
-    setAutoSaveInterval(interval: number): void {
-      this.autoSaveInterval = interval;
-    },
-
-    /**
-     * 设置语言环境
-     * @param locale - 语言代码
-     */
-    setLocale(locale: string): void {
-      this.locale = locale;
-    },
-
-    /**
-     * 标记有未保存的更改
-     */
-    markUnsaved(): void {
-      this.hasUnsavedChanges = true;
-    },
-
-    /**
-     * 标记已保存
-     */
-    markSaved(): void {
-      this.hasUnsavedChanges = false;
-      this.lastSaveTime = Date.now();
-    },
-
-    /**
-     * 设置错误
-     * @param error - 错误对象，null 表示清除错误
-     */
-    setError(error: Error | null): void {
-      this.error = error;
-      if (error) {
-        this.state = 'error';
-      }
-    },
-
-    /**
-     * 清除错误
-     */
-    clearError(): void {
-      this.error = null;
-      // 恢复到就绪状态（如果之前是 error 状态）
-      if (this.state === 'error') {
-        this.state = 'ready';
-      }
-    },
-
-    /**
-     * 重置状态
-     */
-    reset(): void {
-      this.state = 'idle';
-      this.currentLayout = 'infinite-canvas';
-      this.isConnected = false;
-      this.hasUnsavedChanges = false;
-      this.lastSaveTime = null;
-      this.error = null;
-    },
-
-    /**
-     * 初始化编辑器状态
-     * @param options - 初始化选项
-     */
-    initialize(options: Partial<EditorStoreState> = {}): void {
-      if (options.debug !== undefined) {
-        this.debug = options.debug;
-      }
-      if (options.currentLayout) {
-        this.currentLayout = options.currentLayout;
-      }
-      if (options.autoSaveInterval !== undefined) {
-        this.autoSaveInterval = options.autoSaveInterval;
-      }
-      if (options.locale) {
-        this.locale = options.locale;
-      }
-      this.state = 'initializing';
-    },
-  },
-});
-
-/** 导出类型 */
-export type EditorStore = ReturnType<typeof useEditorStore>;
+/** 暴露内部 store 用于测试 */
+export const __editorStoreInternal = editorStore;

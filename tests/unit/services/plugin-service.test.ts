@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const registerPlugin = vi.fn();
-const enablePlugin = vi.fn();
-
 const {
   listMock,
   getCardPluginMock,
@@ -13,15 +10,6 @@ const {
   getCardPluginMock: vi.fn(),
   getCardRuntimeContextMock: vi.fn(),
   resolveFileUrlMock: vi.fn(),
-}));
-
-vi.mock('@/services/sdk-service', () => ({
-  getEditorSdk: vi.fn(async () => ({
-    registerPlugin,
-    plugins: {
-      enable: enablePlugin,
-    },
-  })),
 }));
 
 vi.mock('@/services/editor-runtime-gateway', () => ({
@@ -88,8 +76,6 @@ function resetRuntimeMocks(): void {
 
 describe('plugin-service', () => {
   beforeEach(() => {
-    registerPlugin.mockReset();
-    enablePlugin.mockReset();
     __resetPluginServiceForTests();
     vi.restoreAllMocks();
     resetRuntimeMocks();

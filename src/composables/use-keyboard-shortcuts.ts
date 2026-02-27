@@ -4,7 +4,7 @@
  * @description 提供撤销/重做快捷键绑定
  */
 
-import { onMounted, onUnmounted, ref, readonly } from 'vue';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useCommandManager } from '@/core/command-manager';
 
 /**
@@ -42,9 +42,6 @@ function isMac(): boolean {
 
 /**
  * 检测修饰键是否匹配
- * @param event - 键盘事件
- * @param requireCtrlOrCmd - 是否需要 Ctrl/Cmd
- * @param requireShift - 是否需要 Shift
  */
 function checkModifiers(
   event: KeyboardEvent,
@@ -53,95 +50,83 @@ function checkModifiers(
 ): boolean {
   const mac = isMac();
   const ctrlOrCmd = mac ? event.metaKey : event.ctrlKey;
-  
+
   if (requireCtrlOrCmd && !ctrlOrCmd) return false;
   if (!requireCtrlOrCmd && ctrlOrCmd) return false;
   if (requireShift && !event.shiftKey) return false;
   if (!requireShift && event.shiftKey) return false;
   if (event.altKey) return false;
-  
+
   return true;
 }
 
 /**
- * 键盘快捷键组合式函数
- * 
+ * 键盘快捷键 Hook
+ *
  * 提供撤销/重做快捷键绑定：
  * - Ctrl/Cmd+Z: 撤销
  * - Ctrl/Cmd+Shift+Z: 重做
- * 
+ *
  * @param config - 配置选项
  * @returns 快捷键状态和方法
- * 
+ *
  * @example
- * ```vue
- * <script setup lang="ts">
+ * ```tsx
  * import { useKeyboardShortcuts } from '@/composables/use-keyboard-shortcuts';
- * 
+ *
  * const { state, undo, redo, setEnabled } = useKeyboardShortcuts();
- * </script>
- * 
- * <template>
- *   <button @click="undo" :disabled="!state.canUndo">撤销</button>
- *   <button @click="redo" :disabled="!state.canRedo">重做</button>
- * </template>
  * ```
  */
 export function useKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
   const commandManager = useCommandManager();
-  
+
   // 配置
-  const enabled = ref(config.enabled ?? true);
-  
+  const [enabled, setEnabled] = useState(config.enabled ?? true);
+
   // 状态
-  const state = ref<ShortcutState>({
+  const [state, setState] = useState<ShortcutState>({
     canUndo: commandManager.canUndo(),
     canRedo: commandManager.canRedo(),
     undoStackSize: commandManager.undoStackSize,
     redoStackSize: commandManager.redoStackSize,
   });
-  
+
   // 更新状态
-  const updateState = () => {
-    state.value = {
+  const updateState = useCallback(() => {
+    setState({
       canUndo: commandManager.canUndo(),
       canRedo: commandManager.canRedo(),
       undoStackSize: commandManager.undoStackSize,
       redoStackSize: commandManager.redoStackSize,
-    };
-  };
-  
+    });
+  }, [commandManager]);
+
   // 撤销操作
-  const undo = async (): Promise<boolean> => {
-    if (!enabled.value || !state.value.canUndo) {
+  const undo = useCallback(async (): Promise<boolean> => {
+    if (!enabled || !state.canUndo) {
       return false;
     }
-    
+
     const result = await commandManager.undo();
     updateState();
     return result;
-  };
-  
+  }, [enabled, state.canUndo, commandManager, updateState]);
+
   // 重做操作
-  const redo = async (): Promise<boolean> => {
-    if (!enabled.value || !state.value.canRedo) {
+  const redo = useCallback(async (): Promise<boolean> => {
+    if (!enabled || !state.canRedo) {
       return false;
     }
-    
+
     const result = await commandManager.redo();
     updateState();
     return result;
-  };
-  
-  // 设置启用状态
-  const setEnabled = (value: boolean) => {
-    enabled.value = value;
-  };
-  
+  }, [enabled, state.canRedo, commandManager, updateState]);
+
   // 键盘事件处理器
-  const handleKeyDown = async (event: KeyboardEvent) => {
-    if (!enabled.value) return;
-    
+  const handleKeyDown = useCallback(async (event: KeyboardEvent) => {
+    if (!enabled) return;
+
     // 忽略输入框中的快捷键
     const target = event.target as HTMLElement;
     if (
@@ -151,63 +136,64 @@ export function useKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
     ) {
       return;
     }
-    
+
     // Ctrl/Cmd+Z: 撤销
     if (event.key === 'z' && checkModifiers(event, true, false)) {
       event.preventDefault();
       await undo();
       return;
     }
-    
+
     // Ctrl/Cmd+Shift+Z: 重做
     if (event.key === 'z' && checkModifiers(event, true, true)) {
       event.preventDefault();
       await redo();
       return;
     }
-    
+
     // Ctrl/Cmd+Y: 重做（Windows 风格）
     if (event.key === 'y' && checkModifiers(event, true, false)) {
       event.preventDefault();
       await redo();
       return;
     }
-  };
-  
+  }, [enabled, undo, redo]);
+
   // 订阅状态变化
-  const handleStateChange = () => {
+  const handleStateChange = useCallback(() => {
     updateState();
-  };
-  
-  onMounted(() => {
+  }, [updateState]);
+
+  // 使用 useEffect 管理生命周期
+  useEffect(() => {
     // 注册键盘事件
     window.addEventListener('keydown', handleKeyDown);
-    
+
     // 订阅命令管理器状态变化
     commandManager.on('state:changed', handleStateChange);
     commandManager.on('command:executed', handleStateChange);
     commandManager.on('command:undone', handleStateChange);
     commandManager.on('command:redone', handleStateChange);
     commandManager.on('history:cleared', handleStateChange);
-  });
-  
-  onUnmounted(() => {
-    // 注销键盘事件
-    window.removeEventListener('keydown', handleKeyDown);
-    
-    // 取消订阅
-    commandManager.off('state:changed', handleStateChange);
-    commandManager.off('command:executed', handleStateChange);
-    commandManager.off('command:undone', handleStateChange);
-    commandManager.off('command:redone', handleStateChange);
-    commandManager.off('history:cleared', handleStateChange);
-  });
-  
+
+    return () => {
+      // 注销键盘事件
+      window.removeEventListener('keydown', handleKeyDown);
+
+      // 取消订阅
+      commandManager.off('state:changed', handleStateChange);
+      commandManager.off('command:executed', handleStateChange);
+      commandManager.off('command:undone', handleStateChange);
+      commandManager.off('command:redone', handleStateChange);
+      commandManager.off('history:cleared', handleStateChange);
+    };
+  }, [commandManager, handleKeyDown, handleStateChange]);
+
   return {
-    /** 快捷键状态（只读） */
-    state: readonly(state),
+    /** 快捷键状态 */
+    state,
     /** 是否启用 */
-    enabled: readonly(enabled),
+    enabled,
     /** 执行撤销 */
     undo,
     /** 执行重做 */
@@ -220,11 +206,11 @@ export function useKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
 }
 
 /**
- * 全局快捷键钩子
- * 
+ * 全局快捷键工厂函数
+ *
  * 与 useKeyboardShortcuts 类似，但不需要在组件中挂载
  * 适用于非组件场景
- * 
+ *
  * @example
  * ```typescript
  * const { install, uninstall, undo, redo } = createKeyboardShortcuts();
@@ -235,12 +221,12 @@ export function useKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
  */
 export function createKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
   const commandManager = useCommandManager();
-  let enabled = config.enabled ?? true;
-  let installed = false;
-  
+  const enabledRef = useRef(config.enabled ?? true);
+  const installedRef = useRef(false);
+
   const handleKeyDown = async (event: KeyboardEvent) => {
-    if (!enabled) return;
-    
+    if (!enabledRef.current) return;
+
     const target = event.target as HTMLElement;
     if (
       target.tagName === 'INPUT' ||
@@ -249,14 +235,14 @@ export function createKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
     ) {
       return;
     }
-    
+
     // Ctrl/Cmd+Z: 撤销
     if (event.key === 'z' && checkModifiers(event, true, false)) {
       event.preventDefault();
       await commandManager.undo();
       return;
     }
-    
+
     // Ctrl/Cmd+Shift+Z 或 Ctrl/Cmd+Y: 重做
     if (
       (event.key === 'z' && checkModifiers(event, true, true)) ||
@@ -267,25 +253,25 @@ export function createKeyboardShortcuts(config: Partial<ShortcutConfig> = {}) {
       return;
     }
   };
-  
+
   return {
     /** 安装快捷键监听 */
     install: () => {
-      if (!installed) {
+      if (!installedRef.current) {
         window.addEventListener('keydown', handleKeyDown);
-        installed = true;
+        installedRef.current = true;
       }
     },
     /** 卸载快捷键监听 */
     uninstall: () => {
-      if (installed) {
+      if (installedRef.current) {
         window.removeEventListener('keydown', handleKeyDown);
-        installed = false;
+        installedRef.current = false;
       }
     },
     /** 设置启用状态 */
     setEnabled: (value: boolean) => {
-      enabled = value;
+      enabledRef.current = value;
     },
     /** 执行撤销 */
     undo: () => commandManager.undo(),

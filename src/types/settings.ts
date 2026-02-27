@@ -16,7 +16,7 @@
  * 3. 完成。菜单自动出现，数据自动管理。
  */
 
-import type { Component } from 'vue';
+import type { ComponentType } from 'react';
 
 // ============================================================
 // 设置分类标识与元数据
@@ -92,8 +92,8 @@ export interface SettingsCategory {
 export interface SettingsPanelDefinition<T = unknown> {
   /** 分类元数据（菜单显示用） */
   category: SettingsCategory;
-  /** 面板 Vue 组件 */
-  component: Component;
+  /** 面板 React 组件 */
+  component: ComponentType;
   /** 该分类的默认设置数据 */
   defaultData: T;
   /**
@@ -168,10 +168,10 @@ export interface FileModeSettingsData {
  * 关于面板数据
  *
  * 关于面板为纯展示，不需要可修改的设置数据。
- * 此处定义空接口作为占位，保持架构一致性。
+ * 此处定义空接口作为保留结构，保持架构一致性。
  */
 export interface AboutSettingsData {
-  /** 占位字段，关于面板无可修改设置 */
+  /** 保留字段，关于面板无可修改设置 */
   readonly _placeholder?: never;
 }
 

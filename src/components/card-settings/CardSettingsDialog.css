@@ -1,0 +1,179 @@
+/* ============================================================
+ * CardSettingsDialog 样式
+ * 从 CardSettingsDialog.vue 迁移
+ * ============================================================ */
+
+/* ============================================================
+ * 遮罩层
+ * ============================================================ */
+.card-settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+/* ============================================================
+ * 对话框容器
+ * ============================================================ */
+.card-settings-dialog {
+  width: 600px;
+  height: 640px;
+  background: var(--chips-color-surface, #ffffff);
+  border-radius: var(--chips-radius-lg, 12px);
+  box-shadow: var(--chips-shadow-xl, 0 20px 25px -5px rgb(0 0 0 / 0.1));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ============================================================
+ * 头部
+ * ============================================================ */
+.card-settings-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--chips-spacing-md, 16px) var(--chips-spacing-lg, 24px);
+  border-bottom: 1px solid var(--chips-color-border, #e5e7eb);
+  flex-shrink: 0;
+}
+
+.card-settings-dialog__title {
+  font-size: var(--chips-font-size-lg, 18px);
+  font-weight: var(--chips-font-weight-bold, 600);
+  color: var(--chips-color-text, #111827);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.card-settings-dialog__close-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: var(--chips-radius-md, 8px);
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--chips-color-text-secondary, #6b7280);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--chips-transition-fast, 150ms ease),
+    color var(--chips-transition-fast, 150ms ease);
+}
+
+.card-settings-dialog__close-btn:hover {
+  background: color-mix(in srgb, var(--chips-color-text) 6%, transparent);
+  color: var(--chips-color-text, #111827);
+}
+
+/* ============================================================
+ * 主体 - Tabs + 内容
+ * ============================================================ */
+.card-settings-dialog__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Tabs 组件主题样式 */
+.card-settings-dialog__tabs {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.card-settings-dialog__tabs .chips-tabs__nav {
+  padding: 0 var(--chips-spacing-lg, 24px);
+  border-bottom: 1px solid var(--chips-color-border, #e5e7eb);
+  flex-shrink: 0;
+}
+
+.card-settings-dialog__tabs .chips-tabs__nav-list {
+  display: flex;
+  gap: var(--chips-spacing-xs, 4px);
+}
+
+.card-settings-dialog__tabs .chips-tabs__tab {
+  padding: var(--chips-spacing-sm, 12px) var(--chips-spacing-md, 16px);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color var(--chips-transition-fast, 150ms ease),
+    border-color var(--chips-transition-fast, 150ms ease);
+}
+
+.card-settings-dialog__tabs .chips-tabs__tab-btn {
+  font-size: var(--chips-font-size-sm, 14px);
+  color: var(--chips-color-text-secondary, #6b7280);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  transition: color var(--chips-transition-fast, 150ms ease);
+}
+
+.card-settings-dialog__tabs .chips-tabs__tab:hover .chips-tabs__tab-btn {
+  color: var(--chips-color-text, #111827);
+}
+
+.card-settings-dialog__tabs .chips-tabs__tab--active {
+  border-bottom-color: var(--chips-color-primary, #3b82f6);
+}
+
+.card-settings-dialog__tabs .chips-tabs__tab--active .chips-tabs__tab-btn {
+  color: var(--chips-color-primary, #3b82f6);
+  font-weight: var(--chips-font-weight-medium, 500);
+}
+
+.card-settings-dialog__tabs .chips-tabs__ink-bar {
+  display: none;
+}
+
+.card-settings-dialog__tabs .chips-tabs__content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.card-settings-dialog__tabs .chips-tabs__tabpane {
+  height: 100%;
+}
+
+.card-settings-dialog__tabs .chips-tabs__tabpane--hidden {
+  display: none;
+}
+
+/* 面板内容区内边距 */
+.card-settings-dialog__panel {
+  padding: var(--chips-spacing-lg, 24px);
+}
+
+/* ============================================================
+ * 底部按钮
+ * ============================================================ */
+.card-settings-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--chips-spacing-md, 16px);
+  padding: var(--chips-spacing-md, 16px) var(--chips-spacing-lg, 24px);
+  border-top: 1px solid var(--chips-color-border, #e5e7eb);
+  flex-shrink: 0;
+}
+
+.card-settings-dialog__btn {
+  padding: 8px var(--chips-spacing-lg, 24px);
+  border: none;
+  border-radius: var(--chips-radius-md, 8px);
+  font-size: var(--chips-font-size-sm, 14px);
+  font-weight: var(--chips-font-weight-medium, 500);
+  cursor: pointer;
+  transition: background-color var(--chips-transition-fast, 150ms ease),
+    color var(--chips-transition-fast, 150ms ease);
+}

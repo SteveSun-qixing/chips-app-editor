@@ -5,7 +5,7 @@
  * 卡片设置对话框的各面板组件
  */
 
-export { default as BasicInfoPanel } from './BasicInfoPanel.vue';
-export { default as CoverPanel } from './CoverPanel.vue';
-export { default as ThemePanel } from './ThemePanel.vue';
-export { default as ExportPanel } from './ExportPanel.vue';
+export { BasicInfoPanel } from './BasicInfoPanel';
+export { ExportPanel } from './ExportPanel';
+export { CoverPanel } from './CoverPanel';
+export { ThemePanel } from './ThemePanel';

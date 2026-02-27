@@ -9,9 +9,10 @@
  * - 基础卡片通过插件系统渲染
  */
 
-import { ref, computed, reactive, type Ref, type ComputedRef } from 'vue';
+import yaml from 'yaml';
 import type { EventEmitter } from './event-manager';
 import { createEventEmitter } from './event-manager';
+import { resourceService } from '@/services/resource-service';
 import { generateId62 } from '@/utils';
 
 /** 基础卡片数据 */
@@ -80,11 +81,11 @@ export interface CompositeCard {
 /** 卡片服务接口 */
 export interface CardService {
   /** 已打开的卡片 */
-  openedCards: ComputedRef<CompositeCard[]>;
+  openedCards: CompositeCard[];
   /** 当前选中的卡片 ID */
-  selectedCardId: Ref<string | null>;
+  selectedCardId: string | null;
   /** 当前选中的基础卡片 ID */
-  selectedBasicCardId: Ref<string | null>;
+  selectedBasicCardId: string | null;
   /** 创建新卡片 */
   createCard: (name: string, initialBasicCard?: { type: string; data?: Record<string, unknown> }) => Promise<CompositeCard>;
   /** 打开卡片 */
@@ -120,6 +121,41 @@ function now(): string {
   return new Date().toISOString();
 }
 
+function joinPath(...parts: string[]): string {
+  return parts.join('/').replace(/\\/g, '/').replace(/\/+/g, '/');
+}
+
+function resolveCardConfigPath(path: string): string {
+  return joinPath(path, '.card');
+}
+
+function normalizeTags(tags: unknown): string[] | undefined {
+  if (!Array.isArray(tags)) {
+    return undefined;
+  }
+  return tags
+    .filter((tag): tag is string => typeof tag === 'string')
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+}
+
+function normalizeBasicCards(structure: unknown): BasicCardData[] {
+  if (!Array.isArray(structure)) {
+    return [];
+  }
+
+  const timestamp = now();
+  return structure
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => ({
+      id: typeof item.id === 'string' ? item.id : generateId62(),
+      type: typeof item.type === 'string' ? item.type : 'UnknownCard',
+      data: {},
+      createdAt: timestamp,
+      modifiedAt: timestamp,
+    }));
+}
+
 /**
  * 创建卡片服务
  * @param events - 事件发射器
@@ -127,17 +163,19 @@ function now(): string {
 export function createCardService(events?: EventEmitter): CardService {
   const eventEmitter = events || createEventEmitter();
 
-  /** 已打开的卡片（使用 Map 存储以保持响应性） */
-  const cardsMap = reactive<Map<string, CompositeCard>>(new Map());
+  /** 已打开的卡片（使用 Map 存储） */
+  const cardsMap = new Map<string, CompositeCard>();
 
   /** 当前选中的卡片 ID */
-  const selectedCardId = ref<string | null>(null);
+  let selectedCardId: string | null = null;
 
   /** 当前选中的基础卡片 ID */
-  const selectedBasicCardId = ref<string | null>(null);
+  let selectedBasicCardId: string | null = null;
 
-  /** 已打开的卡片列表 */
-  const openedCards = computed(() => Array.from(cardsMap.values()));
+  /** 已打开的卡片列表 getter */
+  function getOpenedCards(): CompositeCard[] {
+    return Array.from(cardsMap.values());
+  }
 
   /**
    * 创建新卡片
@@ -187,13 +225,13 @@ export function createCardService(events?: EventEmitter): CardService {
     cardsMap.set(id, newCard);
 
     // 自动选中新卡片
-    selectedCardId.value = id;
+    selectedCardId = id;
 
     // 如果有基础卡片，选中它
     if (basicCards.length > 0) {
       const firstCard = basicCards[0];
       if (firstCard) {
-        selectedBasicCardId.value = firstCard.id;
+        selectedBasicCardId = firstCard.id;
       }
     }
 
@@ -212,21 +250,18 @@ export function createCardService(events?: EventEmitter): CardService {
     // 检查是否已打开
     const existing = cardsMap.get(id);
     if (existing) {
-      selectedCardId.value = id;
+      selectedCardId = id;
       return existing;
     }
 
-    // TODO: 从文件系统读取卡片数据
-    // const cardData = await sdk.card.read(path);
-
-    // 模拟读取
+    const fallbackTimestamp = now();
     const card: CompositeCard = {
       id,
       path,
       metadata: {
         name: path.replace(/^\/|\.card$/g, ''),
-        createdAt: now(),
-        modifiedAt: now(),
+        createdAt: fallbackTimestamp,
+        modifiedAt: fallbackTimestamp,
       },
       structure: {
         basicCards: [],
@@ -236,8 +271,38 @@ export function createCardService(events?: EventEmitter): CardService {
       isEditing: false,
     };
 
+    try {
+      const configPath = resolveCardConfigPath(path);
+      const metadataRaw = await resourceService.readText(joinPath(configPath, 'metadata.yaml'));
+      const structureRaw = await resourceService.readText(joinPath(configPath, 'structure.yaml'));
+      const metadataDoc = yaml.parse(metadataRaw) as Record<string, unknown> | null;
+      const structureDoc = yaml.parse(structureRaw) as Record<string, unknown> | null;
+
+      const parsedName =
+        typeof metadataDoc?.name === 'string'
+          ? metadataDoc.name
+          : path.replace(/^\/|\.card$/g, '');
+      const parsedCreatedAt =
+        typeof metadataDoc?.created_at === 'string' ? metadataDoc.created_at : fallbackTimestamp;
+      const parsedModifiedAt =
+        typeof metadataDoc?.modified_at === 'string' ? metadataDoc.modified_at : parsedCreatedAt;
+
+      card.metadata = {
+        name: parsedName,
+        createdAt: parsedCreatedAt,
+        modifiedAt: parsedModifiedAt,
+        description:
+          typeof metadataDoc?.description === 'string' ? metadataDoc.description : undefined,
+        themeId: typeof metadataDoc?.theme === 'string' ? metadataDoc.theme : undefined,
+        tags: normalizeTags(metadataDoc?.tags),
+      };
+      card.structure.basicCards = normalizeBasicCards(structureDoc?.structure);
+    } catch (error) {
+      console.warn('[CardService] 使用默认卡片结构回退:', { path, error });
+    }
+
     cardsMap.set(id, card);
-    selectedCardId.value = id;
+    selectedCardId = id;
 
     eventEmitter.emit('card:opened', { card });
     console.warn('[CardService] 打开卡片:', path);
@@ -252,13 +317,20 @@ export function createCardService(events?: EventEmitter): CardService {
   function closeCard(id: string): void {
     const card = cardsMap.get(id);
     if (card) {
-      // TODO: 如果有未保存的修改，提示用户
+      if (card.isDirty) {
+        eventEmitter.emit('card:close-blocked', {
+          cardId: id,
+          reason: 'unsaved-changes',
+        });
+        return;
+      }
+
       cardsMap.delete(id);
 
       // 如果关闭的是当前选中的卡片，清空选中状态
-      if (selectedCardId.value === id) {
-        selectedCardId.value = null;
-        selectedBasicCardId.value = null;
+      if (selectedCardId === id) {
+        selectedCardId = null;
+        selectedBasicCardId = null;
       }
 
       eventEmitter.emit('card:closed', { card });
@@ -274,14 +346,36 @@ export function createCardService(events?: EventEmitter): CardService {
     const card = cardsMap.get(id);
     if (!card) return;
 
-    // TODO: 将卡片数据保存到文件系统
-    // await sdk.card.save(card.path, {
-    //   metadata: card.metadata,
-    //   structure: card.structure,
-    // });
+    const configPath = resolveCardConfigPath(card.path);
+    const timestamp = now();
+    const metadata = {
+      card_id: card.id,
+      name: card.metadata.name,
+      created_at: card.metadata.createdAt,
+      modified_at: timestamp,
+      theme: card.metadata.themeId,
+      tags: card.metadata.tags ?? [],
+      description: card.metadata.description ?? '',
+      chip_standards_version: '1.0.0',
+    };
+    const structure = {
+      structure: card.structure.basicCards.map((basicCard) => ({
+        id: basicCard.id,
+        type: basicCard.type,
+      })),
+      manifest: {
+        card_count: card.structure.basicCards.length,
+        resource_count: 0,
+        resources: [],
+      },
+    };
+
+    await resourceService.ensureDir(configPath);
+    await resourceService.writeText(joinPath(configPath, 'metadata.yaml'), yaml.stringify(metadata));
+    await resourceService.writeText(joinPath(configPath, 'structure.yaml'), yaml.stringify(structure));
 
     card.isDirty = false;
-    card.metadata.modifiedAt = now();
+    card.metadata.modifiedAt = timestamp;
 
     eventEmitter.emit('card:saved', { card });
     console.warn('[CardService] 保存卡片:', card.metadata.name);
@@ -325,7 +419,7 @@ export function createCardService(events?: EventEmitter): CardService {
     card.metadata.modifiedAt = timestamp;
 
     // 自动选中新添加的基础卡片
-    selectedBasicCardId.value = basicCard.id;
+    selectedBasicCardId = basicCard.id;
 
     eventEmitter.emit('card:basic-card-added', { cardId, basicCard, position });
     console.warn('[CardService] 添加基础卡片:', type, '到卡片:', card.metadata.name);
@@ -349,8 +443,8 @@ export function createCardService(events?: EventEmitter): CardService {
       card.metadata.modifiedAt = now();
 
       // 如果删除的是当前选中的基础卡片，清空选中状态
-      if (selectedBasicCardId.value === basicCardId) {
-        selectedBasicCardId.value = null;
+      if (selectedBasicCardId === basicCardId) {
+        selectedBasicCardId = null;
       }
 
       eventEmitter.emit('card:basic-card-removed', { cardId, basicCardId });
@@ -408,9 +502,9 @@ export function createCardService(events?: EventEmitter): CardService {
    * @param id - 卡片 ID
    */
   function selectCard(id: string | null): void {
-    selectedCardId.value = id;
+    selectedCardId = id;
     if (id === null) {
-      selectedBasicCardId.value = null;
+      selectedBasicCardId = null;
     }
     eventEmitter.emit('card:selected', { cardId: id });
   }
@@ -420,7 +514,7 @@ export function createCardService(events?: EventEmitter): CardService {
    * @param basicCardId - 基础卡片 ID
    */
   function selectBasicCard(basicCardId: string | null): void {
-    selectedBasicCardId.value = basicCardId;
+    selectedBasicCardId = basicCardId;
     eventEmitter.emit('card:basic-card-selected', { basicCardId });
   }
 
@@ -459,9 +553,11 @@ export function createCardService(events?: EventEmitter): CardService {
   }
 
   return {
-    openedCards,
-    selectedCardId,
-    selectedBasicCardId,
+    get openedCards() { return getOpenedCards(); },
+    get selectedCardId() { return selectedCardId; },
+    set selectedCardId(v: string | null) { selectedCardId = v; },
+    get selectedBasicCardId() { return selectedBasicCardId; },
+    set selectedBasicCardId(v: string | null) { selectedBasicCardId = v; },
     createCard,
     openCard,
     closeCard,

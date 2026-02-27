@@ -10,6 +10,14 @@ icon: "assets/icon.png"
 entry:
   main: "dist/index.html"
 
+ui:
+  layout:
+    owner: page
+    unit: cpx
+    baseWidth: 1024
+    contract: ./contracts/page-layout.contract.json
+    minFunctionalSet: ./contracts/min-functional-set.json
+
 permissions:
   - file.read
   - file.write

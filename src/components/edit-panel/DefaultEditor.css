@@ -1,0 +1,223 @@
+/* ==================== 容器 ==================== */
+.default-editor {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* ==================== 工具栏 ==================== */
+.default-editor__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--chips-spacing-sm, 8px);
+    border-bottom: 1px solid var(--chips-color-border, #e0e0e0);
+    background: var(--chips-color-surface-variant, #f5f5f5);
+    flex-shrink: 0;
+}
+
+.default-editor__info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.default-editor__type {
+    font-size: var(--chips-font-size-sm, 14px);
+    font-weight: var(--chips-font-weight-medium, 500);
+    color: var(--chips-color-text-primary, #1a1a1a);
+}
+
+.default-editor__id {
+    font-size: var(--chips-font-size-xs, 12px);
+    color: var(--chips-color-text-secondary, #666666);
+    font-family: var(--chips-font-mono, monospace);
+}
+
+.default-editor__actions {
+    display: flex;
+    gap: var(--chips-spacing-xs, 4px);
+}
+
+.default-editor__btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--chips-radius-sm, 4px);
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--chips-font-size-sm, 14px);
+    transition: background-color var(--chips-transition-fast, 0.15s) ease;
+}
+
+.default-editor__btn:hover {
+    background: var(--chips-color-surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+.default-editor__btn--mode {
+    font-family: var(--chips-font-mono, monospace);
+}
+
+/* ==================== JSON 编辑器 ==================== */
+.default-editor__json {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.default-editor__json-input {
+    flex: 1;
+    width: 100%;
+}
+
+.default-editor__json-input .chips-textarea__inner {
+    padding: var(--chips-spacing-md, 12px);
+    font-family: var(--chips-font-mono, monospace);
+    font-size: var(--chips-font-size-sm, 14px);
+    line-height: 1.5;
+    color: var(--chips-color-text-primary, #1a1a1a);
+    background: var(--chips-color-surface, #ffffff);
+    border: none;
+    resize: none;
+    outline: none;
+}
+
+.default-editor__json-input--error .chips-textarea__inner {
+    background: var(--chips-color-error-bg, #fef2f2);
+}
+
+.default-editor__json-error {
+    padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 12px);
+    font-size: var(--chips-font-size-xs, 12px);
+    color: var(--chips-color-error, #ef4444);
+    background: var(--chips-color-error-bg, #fef2f2);
+    border-top: 1px solid var(--chips-color-error, #ef4444);
+}
+
+/* ==================== 表单编辑器 ==================== */
+.default-editor__form {
+    flex: 1;
+    padding: var(--chips-spacing-md, 12px);
+    overflow: auto;
+}
+
+.default-editor__empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--chips-color-text-secondary, #666666);
+}
+
+.default-editor__field {
+    margin-bottom: var(--chips-spacing-md, 12px);
+}
+
+.default-editor__field--error .default-editor__input .chips-input__inner,
+.default-editor__field--error .default-editor__select .chips-select__selector,
+.default-editor__field--error .default-editor__textarea .chips-textarea__inner {
+    border-color: var(--chips-color-error, #ef4444);
+}
+
+.default-editor__label {
+    display: block;
+    margin-bottom: var(--chips-spacing-xs, 4px);
+    font-size: var(--chips-font-size-sm, 14px);
+    font-weight: var(--chips-font-weight-medium, 500);
+    color: var(--chips-color-text-primary, #1a1a1a);
+}
+
+.default-editor__required {
+    color: var(--chips-color-error, #ef4444);
+    margin-left: 2px;
+}
+
+.default-editor__input,
+.default-editor__select,
+.default-editor__textarea {
+    width: 100%;
+}
+
+.default-editor__input .chips-input__inner,
+.default-editor__select .chips-select__selector,
+.default-editor__textarea .chips-textarea__inner {
+    width: 100%;
+    padding: var(--chips-spacing-sm, 8px);
+    font-size: var(--chips-font-size-sm, 14px);
+    color: var(--chips-color-text-primary, #1a1a1a);
+    background: var(--chips-color-surface, #ffffff);
+    border: 1px solid var(--chips-color-border, #e0e0e0);
+    border-radius: var(--chips-radius-sm, 4px);
+    outline: none;
+    transition: border-color var(--chips-transition-fast, 0.15s) ease,
+        box-shadow var(--chips-transition-fast, 0.15s) ease;
+}
+
+.default-editor__input .chips-input__inner:focus,
+.default-editor__select .chips-select__selector:focus-within,
+.default-editor__textarea .chips-textarea__inner:focus {
+    border-color: var(--chips-color-primary, #3b82f6);
+    box-shadow: 0 0 0 3px var(--chips-color-primary-alpha, rgba(59, 130, 246, 0.1));
+}
+
+.default-editor__textarea .chips-textarea__inner {
+    min-height: 80px;
+    resize: vertical;
+}
+
+/* 复选框 */
+.default-editor__checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--chips-spacing-sm, 8px);
+}
+
+/* 颜色选择 */
+.default-editor__color-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-sm, 8px);
+}
+
+.default-editor__color {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: var(--chips-radius-sm, 4px);
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.default-editor__color .chips-input__inner {
+    padding: 0;
+    border: none;
+    cursor: pointer;
+}
+
+.default-editor__color-text {
+    flex: 1;
+}
+
+/* 错误提示 */
+.default-editor__error {
+    display: block;
+    margin-top: var(--chips-spacing-xs, 4px);
+    font-size: var(--chips-font-size-xs, 12px);
+    color: var(--chips-color-error, #ef4444);
+}
+
+/* ==================== 过渡动画 ==================== */
+.default-editor-fade-enter-active,
+.default-editor-fade-leave-active {
+    transition: opacity var(--chips-transition-fast, 0.15s) ease;
+}
+
+.default-editor-fade-enter-from,
+.default-editor-fade-leave-to {
+    opacity: 0;
+}

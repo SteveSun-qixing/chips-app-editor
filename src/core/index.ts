@@ -22,9 +22,14 @@ export { EventEmitter, createEventEmitter } from './event-manager';
 
 // ==================== 状态管理 ====================
 export {
+  getEditorStore,
   useEditorStore,
+  getCardStore,
   useCardStore,
+  getUIStore,
   useUIStore,
+  getSettingsStore,
+  useSettingsStore,
 } from './state';
 
 export type {

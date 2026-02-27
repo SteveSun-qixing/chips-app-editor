@@ -194,7 +194,7 @@ export class FileService {
 
   private async ensureWorkspaceReady(): Promise<ReturnType<typeof useWorkspaceService>> {
     const workspaceService = useWorkspaceService();
-    if (!workspaceService.isInitialized.value) {
+    if (!workspaceService.isInitialized) {
       await workspaceService.initialize();
     }
     return workspaceService;
@@ -224,7 +224,7 @@ export class FileService {
 
   async getFileTree(): Promise<FileInfo[]> {
     const workspaceService = await this.ensureWorkspaceReady();
-    const wsFiles = workspaceService.files.value;
+    const wsFiles = workspaceService.files;
     return wsFiles.map((file) => convertWorkspaceFile(file, this.expandedPaths));
   }
 

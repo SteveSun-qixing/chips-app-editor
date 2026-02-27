@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "chips-app-editor page layout contract",
+  "type": "object",
+  "required": [
+    "owner",
+    "unit",
+    "baseWidth",
+    "breakpoints",
+    "minFunctionalSet"
+  ],
+  "properties": {
+    "owner": {
+      "const": "page"
+    },
+    "unit": {
+      "const": "cpx"
+    },
+    "baseWidth": {
+      "type": "number",
+      "const": 1024
+    },
+    "breakpoints": {
+      "type": "object",
+      "required": [
+        "compact",
+        "medium",
+        "wide"
+      ],
+      "properties": {
+        "compact": {
+          "type": "number",
+          "minimum": 0
+        },
+        "medium": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wide": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "minFunctionalSet": {
+      "type": "string"
+    }
+  }
+}

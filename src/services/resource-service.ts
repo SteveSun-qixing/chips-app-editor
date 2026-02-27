@@ -9,6 +9,7 @@
  */
 
 import {
+  BridgeClient,
   Logger,
   ConfigManager,
   ConversionAPI,
@@ -17,7 +18,6 @@ import {
   type ImageConversionOptions,
   type PDFConversionOptions,
 } from '@chips/sdk';
-import { getEditorConnector } from './sdk-service';
 import { invokeEditorRuntime } from './editor-runtime-gateway';
 
 const logger = new Logger('EditorResourceService');
@@ -25,6 +25,12 @@ const config = new ConfigManager();
 
 let initialized = false;
 let conversionApi: ConversionAPI | null = null;
+
+type RuntimeInvoke = <T = unknown>(
+  namespace: string,
+  action: string,
+  params?: unknown
+) => Promise<T>;
 
 /** 运行时工作区路径，通过 setWorkspacePaths 设置 */
 let _workspaceRoot = '';
@@ -119,12 +125,35 @@ export function setWorkspacePaths(workspaceRoot: string, externalRoot: string): 
   _externalRoot = normalizeRootPath(externalRoot);
 }
 
-async function ensureInitialized(): Promise<void> {
+async function ensureConversionApi(): Promise<void> {
   if (initialized) return;
   await config.initialize();
-  const connector = await getEditorConnector();
-  conversionApi = new ConversionAPI(connector, logger, config);
+  const runtimeBridge = createRuntimeRequestBridgeClient();
+  await runtimeBridge.connect();
+  conversionApi = new ConversionAPI(runtimeBridge, logger, config);
   initialized = true;
+}
+
+function createRuntimeRequestBridgeClient(
+  runtimeInvoke: RuntimeInvoke = invokeEditorRuntime
+): BridgeClient {
+  return new BridgeClient({
+    enforceBridge: false,
+    bridge: {
+      invoke: (namespace, action, params) => runtimeInvoke(namespace, action, params),
+      on: () => () => undefined,
+      once: () => () => undefined,
+      emit: () => undefined,
+    },
+  });
+}
+
+export async function __createRuntimeRequestBridgeClientForTests(
+  runtimeInvoke: RuntimeInvoke
+): Promise<BridgeClient> {
+  const bridgeClient = createRuntimeRequestBridgeClient(runtimeInvoke);
+  await bridgeClient.connect();
+  return bridgeClient;
 }
 
 async function invokeFileRuntime<TResult = unknown>(
@@ -143,7 +172,6 @@ export const resourceService = {
   },
 
   async readText(path: string): Promise<string> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     const response = await invokeFileRuntime<{
       content: string;
@@ -154,7 +182,6 @@ export const resourceService = {
   },
 
   async readBinary(path: string): Promise<ArrayBuffer> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     const response = await invokeFileRuntime<{
       content: string;
@@ -171,7 +198,6 @@ export const resourceService = {
   },
 
   async writeText(path: string, content: string): Promise<void> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     await invokeFileRuntime('write', {
       path: resolvedPath,
@@ -182,7 +208,6 @@ export const resourceService = {
   },
 
   async writeBinary(path: string, content: ArrayBuffer): Promise<void> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     // Encode ArrayBuffer to base64
     const bytes = new Uint8Array(content);
@@ -200,20 +225,17 @@ export const resourceService = {
   },
 
   async ensureDir(path: string): Promise<void> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     await invokeFileRuntime('mkdir', { path: resolvedPath, recursive: true });
   },
 
   async exists(path: string): Promise<boolean> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     const response = await invokeFileRuntime<{ exists: boolean }>('exists', { path: resolvedPath });
     return response.exists === true;
   },
 
   async delete(path: string): Promise<void> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     await invokeFileRuntime('delete', {
       path: resolvedPath,
@@ -222,7 +244,6 @@ export const resourceService = {
   },
 
   async list(path: string): Promise<string[]> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     const response = await invokeFileRuntime<{ entries?: Array<{ name: string; type: string }> }>('list', {
       path: resolvedPath,
@@ -238,7 +259,6 @@ export const resourceService = {
     size?: number;
     modified?: string;
   }> {
-    await ensureInitialized();
     const resolvedPath = resolveRequiredBridgePath(path);
     // First check if path exists
     const existsResponse = await invokeFileRuntime<{ exists: boolean }>('exists', { path: resolvedPath });
@@ -266,7 +286,6 @@ export const resourceService = {
   async getCardFiles(
     cardPath: string
   ): Promise<Array<{ path: string; content: string }>> {
-    await ensureInitialized();
     // List files in the card directory and read each one
     const entries = await resourceService.list(cardPath);
     const results: Array<{ path: string; content: string }> = [];
@@ -290,7 +309,7 @@ export const resourceService = {
     outputPath: string,
     options?: HTMLConversionOptions
   ): Promise<ConversionResult> {
-    await ensureInitialized();
+    await ensureConversionApi();
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
@@ -307,7 +326,7 @@ export const resourceService = {
     outputPath: string,
     options?: PDFConversionOptions
   ): Promise<ConversionResult> {
-    await ensureInitialized();
+    await ensureConversionApi();
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
@@ -324,7 +343,7 @@ export const resourceService = {
     outputPath: string,
     options?: ImageConversionOptions
   ): Promise<ConversionResult> {
-    await ensureInitialized();
+    await ensureConversionApi();
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
@@ -337,7 +356,7 @@ export const resourceService = {
   },
 
   async exportCard(cardId: string, outputPath: string): Promise<ConversionResult> {
-    await ensureInitialized();
+    await ensureConversionApi();
     if (!conversionApi) {
       throw new Error('Conversion API not ready');
     }
@@ -346,7 +365,6 @@ export const resourceService = {
   },
 
   async copy(sourcePath: string, destPath: string): Promise<void> {
-    await ensureInitialized();
     const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
     const resolvedDestPath = resolveRequiredBridgePath(destPath);
     await invokeFileRuntime('copy', {
@@ -356,7 +374,6 @@ export const resourceService = {
   },
 
   async move(sourcePath: string, destPath: string): Promise<void> {
-    await ensureInitialized();
     const resolvedSourcePath = resolveRequiredBridgePath(sourcePath);
     const resolvedDestPath = resolveRequiredBridgePath(destPath);
     await invokeFileRuntime('move', {

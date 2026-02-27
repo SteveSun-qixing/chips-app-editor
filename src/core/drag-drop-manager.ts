@@ -4,7 +4,7 @@
  * @description 统一管理编辑器中的所有拖放操作
  */
 
-import { ref, readonly, type Ref } from 'vue';
+
 
 // ==================== 类型定义 ====================
 
@@ -258,7 +258,7 @@ export class DragDropManager {
   private targets = new Map<string, DropTargetConfig>();
 
   /** 拖放状态 */
-  private _state = ref<DragDropState>({
+  private _state: DragDropState = {
     isDragging: false,
     source: null,
     hoverTarget: null,
@@ -266,14 +266,14 @@ export class DragDropManager {
     insertPosition: null,
     canDrop: false,
     dropEffect: 'none',
-  });
+  };
 
   /** 拖放计数器（用于生成唯一 ID） */
   private dragCounter = 0;
 
   /** 只读状态 */
-  get state(): Readonly<Ref<DragDropState>> {
-    return readonly(this._state) as Readonly<Ref<DragDropState>>;
+  get state(): Readonly<DragDropState> {
+    return this._state;
   }
 
   // ==================== 注册/注销 ====================
@@ -351,7 +351,7 @@ export class DragDropManager {
       config,
     };
 
-    this._state.value = {
+    this._state = {
       isDragging: true,
       source,
       hoverTarget: null,
@@ -372,8 +372,8 @@ export class DragDropManager {
    * @param position - 当前位置
    */
   updatePosition(position: Position): void {
-    if (!this._state.value.isDragging) return;
-    this._state.value.position = position;
+    if (!this._state.isDragging) return;
+    this._state.position = position;
   }
 
   /**
@@ -382,16 +382,16 @@ export class DragDropManager {
    * @param rect - 目标矩形（可选）
    */
   setHoverTarget(targetId: string | null, rect?: DOMRect): void {
-    if (!this._state.value.isDragging) return;
+    if (!this._state.isDragging) return;
 
     if (!targetId) {
-      const prevTarget = this._state.value.hoverTarget;
-      if (prevTarget && this._state.value.source) {
-        prevTarget.config.onDragLeave?.(this._state.value.source);
+      const prevTarget = this._state.hoverTarget;
+      if (prevTarget && this._state.source) {
+        prevTarget.config.onDragLeave?.(this._state.source);
       }
 
-      this._state.value.hoverTarget = null;
-      this._state.value.canDrop = false;
+      this._state.hoverTarget = null;
+      this._state.canDrop = false;
       return;
     }
 
@@ -406,19 +406,19 @@ export class DragDropManager {
     };
 
     // 检查是否换了目标
-    const prevTarget = this._state.value.hoverTarget;
-    if (prevTarget && prevTarget.id !== targetId && this._state.value.source) {
-      prevTarget.config.onDragLeave?.(this._state.value.source);
+    const prevTarget = this._state.hoverTarget;
+    if (prevTarget && prevTarget.id !== targetId && this._state.source) {
+      prevTarget.config.onDragLeave?.(this._state.source);
     }
 
     // 触发进入回调
-    if ((!prevTarget || prevTarget.id !== targetId) && this._state.value.source) {
-      config.onDragEnter?.(this._state.value.source);
+    if ((!prevTarget || prevTarget.id !== targetId) && this._state.source) {
+      config.onDragEnter?.(this._state.source);
     }
 
-    this._state.value.hoverTarget = target;
-    const source = this._state.value.source;
-    this._state.value.canDrop = source ? this.checkCanDrop(source, target) : false;
+    this._state.hoverTarget = target;
+    const source = this._state.source;
+    this._state.canDrop = source ? this.checkCanDrop(source, target) : false;
   }
 
   /**
@@ -426,8 +426,8 @@ export class DragDropManager {
    * @param insertPosition - 插入位置信息
    */
   setInsertPosition(insertPosition: InsertPosition | null): void {
-    if (!this._state.value.isDragging) return;
-    this._state.value.insertPosition = insertPosition;
+    if (!this._state.isDragging) return;
+    this._state.insertPosition = insertPosition;
   }
 
   /**
@@ -435,7 +435,7 @@ export class DragDropManager {
    * @returns 是否成功放置
    */
   async drop(): Promise<boolean> {
-    const { source, hoverTarget, position, canDrop } = this._state.value;
+    const { source, hoverTarget, position, canDrop } = this._state;
 
     if (!source || !hoverTarget || !canDrop || !position) {
       this.endDrag(false);
@@ -479,8 +479,8 @@ export class DragDropManager {
    * @param success - 是否成功
    */
   endDrag(success = false): void {
-    const source = this._state.value.source;
-    const hoverTarget = this._state.value.hoverTarget;
+    const source = this._state.source;
+    const hoverTarget = this._state.hoverTarget;
 
     // 触发离开回调
     if (hoverTarget && source) {
@@ -491,7 +491,7 @@ export class DragDropManager {
     source?.config.onDragEnd?.(success);
 
     // 重置状态
-    this._state.value = {
+    this._state = {
       isDragging: false,
       source: null,
       hoverTarget: null,
@@ -657,9 +657,9 @@ export function resetDragDropManager(): void {
  */
 export interface UseFileDropReturn {
   /** 是否有文件悬停 */
-  isFileDragOver: Readonly<Ref<boolean>>;
+  isFileDragOver: boolean;
   /** 拖入的文件数据 */
-  draggedFiles: Readonly<Ref<FileDragData | null>>;
+  draggedFiles: FileDragData | null;
   /** 处理拖入事件 */
   handleDragEnter: (event: DragEvent) => void;
   /** 处理拖动悬停 */
@@ -696,8 +696,8 @@ export interface UseFileDropReturn {
  * ```
  */
 export function useFileDrop(): UseFileDropReturn {
-  const isFileDragOver = ref(false);
-  const draggedFiles = ref<FileDragData | null>(null);
+  let isFileDragOver = false;
+  let draggedFiles: FileDragData | null = null;
   let dragEnterCounter = 0;
 
   function hasFiles(event: DragEvent): boolean {
@@ -712,7 +712,7 @@ export function useFileDrop(): UseFileDropReturn {
     event.stopPropagation();
 
     dragEnterCounter++;
-    isFileDragOver.value = true;
+    isFileDragOver = true;
   }
 
   function handleDragOver(event: DragEvent): void {
@@ -733,8 +733,8 @@ export function useFileDrop(): UseFileDropReturn {
     dragEnterCounter--;
     if (dragEnterCounter <= 0) {
       dragEnterCounter = 0;
-      isFileDragOver.value = false;
-      draggedFiles.value = null;
+      isFileDragOver = false;
+      draggedFiles = null;
     }
   }
 
@@ -743,11 +743,11 @@ export function useFileDrop(): UseFileDropReturn {
     event.stopPropagation();
 
     dragEnterCounter = 0;
-    isFileDragOver.value = false;
+    isFileDragOver = false;
 
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) {
-      draggedFiles.value = null;
+      draggedFiles = null;
       return null;
     }
 
@@ -759,13 +759,13 @@ export function useFileDrop(): UseFileDropReturn {
       types,
     };
 
-    draggedFiles.value = data;
+    draggedFiles = data;
     return data;
   }
 
   return {
-    isFileDragOver: readonly(isFileDragOver),
-    draggedFiles: readonly(draggedFiles) as Readonly<Ref<FileDragData | null>>,
+    get isFileDragOver() { return isFileDragOver; },
+    get draggedFiles() { return draggedFiles; },
     handleDragEnter,
     handleDragOver,
     handleDragLeave,
@@ -778,11 +778,11 @@ export function useFileDrop(): UseFileDropReturn {
  */
 export interface UseCardSortReturn {
   /** 是否正在排序 */
-  isSorting: Readonly<Ref<boolean>>;
+  isSorting: boolean;
   /** 拖动的基础卡片数据 */
-  draggedCard: Readonly<Ref<BaseCardDragData | null>>;
+  draggedCard: BaseCardDragData | null;
   /** 当前插入位置 */
-  insertIndex: Readonly<Ref<number>>;
+  insertIndex: number;
   /** 开始排序 */
   startSort: (data: BaseCardDragData) => void;
   /** 更新插入位置 */
@@ -818,33 +818,33 @@ export interface UseCardSortReturn {
  * ```
  */
 export function useCardSort(): UseCardSortReturn {
-  const isSorting = ref(false);
-  const draggedCard = ref<BaseCardDragData | null>(null);
-  const insertIndex = ref(-1);
+  let isSorting = false;
+  let draggedCard: BaseCardDragData | null = null;
+  let insertIndex = -1;
 
   function startSort(data: BaseCardDragData): void {
-    isSorting.value = true;
-    draggedCard.value = data;
-    insertIndex.value = data.originalIndex;
+    isSorting = true;
+    draggedCard = data;
+    insertIndex = data.originalIndex;
   }
 
   function updateInsertIndex(index: number): void {
-    if (!isSorting.value) return;
-    insertIndex.value = index;
+    if (!isSorting) return;
+    insertIndex = index;
   }
 
   function endSort(): { from: number; to: number } | null {
-    if (!isSorting.value || !draggedCard.value) {
+    if (!isSorting || !draggedCard) {
       cancelSort();
       return null;
     }
 
-    const from = draggedCard.value.originalIndex;
-    const to = insertIndex.value;
+    const from = draggedCard.originalIndex;
+    const to = insertIndex;
 
-    isSorting.value = false;
-    draggedCard.value = null;
-    insertIndex.value = -1;
+    isSorting = false;
+    draggedCard = null;
+    insertIndex = -1;
 
     if (from === to) {
       return null;
@@ -854,15 +854,15 @@ export function useCardSort(): UseCardSortReturn {
   }
 
   function cancelSort(): void {
-    isSorting.value = false;
-    draggedCard.value = null;
-    insertIndex.value = -1;
+    isSorting = false;
+    draggedCard = null;
+    insertIndex = -1;
   }
 
   return {
-    isSorting: readonly(isSorting),
-    draggedCard: readonly(draggedCard),
-    insertIndex: readonly(insertIndex),
+    get isSorting() { return isSorting; },
+    get draggedCard() { return draggedCard; },
+    get insertIndex() { return insertIndex; },
     startSort,
     updateInsertIndex,
     endSort,
@@ -875,13 +875,13 @@ export function useCardSort(): UseCardSortReturn {
  */
 export interface UseCardNestReturn {
   /** 是否正在嵌套拖放 */
-  isNesting: Readonly<Ref<boolean>>;
+  isNesting: boolean;
   /** 拖动的卡片数据 */
-  draggedCard: Readonly<Ref<CardNestDragData | null>>;
+  draggedCard: CardNestDragData | null;
   /** 目标卡片 ID */
-  targetCardId: Readonly<Ref<string | null>>;
+  targetCardId: string | null;
   /** 是否可以嵌套 */
-  canNest: Readonly<Ref<boolean>>;
+  canNest: boolean;
   /** 开始嵌套拖放 */
   startNest: (data: CardNestDragData) => void;
   /** 设置目标卡片 */
@@ -917,54 +917,54 @@ export interface UseCardNestReturn {
  * ```
  */
 export function useCardNest(): UseCardNestReturn {
-  const isNesting = ref(false);
-  const draggedCard = ref<CardNestDragData | null>(null);
-  const targetCardId = ref<string | null>(null);
-  const canNest = ref(false);
+  let isNesting = false;
+  let draggedCard: CardNestDragData | null = null;
+  let targetCardId: string | null = null;
+  let canNest = false;
 
   function startNest(data: CardNestDragData): void {
-    isNesting.value = true;
-    draggedCard.value = data;
-    targetCardId.value = null;
-    canNest.value = false;
+    isNesting = true;
+    draggedCard = data;
+    targetCardId = null;
+    canNest = false;
   }
 
   function setTarget(targetId: string | null, canAccept: boolean): void {
-    if (!isNesting.value) return;
+    if (!isNesting) return;
 
-    targetCardId.value = targetId;
-    canNest.value = canAccept && targetId !== null && targetId !== draggedCard.value?.cardId;
+    targetCardId = targetId;
+    canNest = canAccept && targetId !== null && targetId !== draggedCard?.cardId;
   }
 
   function endNest(): { sourceId: string; targetId: string } | null {
-    if (!isNesting.value || !draggedCard.value || !targetCardId.value || !canNest.value) {
+    if (!isNesting || !draggedCard || !targetCardId || !canNest) {
       cancelNest();
       return null;
     }
 
-    const sourceId = draggedCard.value.cardId;
-    const targetId = targetCardId.value;
+    const sourceId = draggedCard.cardId;
+    const targetId = targetCardId;
 
-    isNesting.value = false;
-    draggedCard.value = null;
-    targetCardId.value = null;
-    canNest.value = false;
+    isNesting = false;
+    draggedCard = null;
+    targetCardId = null;
+    canNest = false;
 
     return { sourceId, targetId };
   }
 
   function cancelNest(): void {
-    isNesting.value = false;
-    draggedCard.value = null;
-    targetCardId.value = null;
-    canNest.value = false;
+    isNesting = false;
+    draggedCard = null;
+    targetCardId = null;
+    canNest = false;
   }
 
   return {
-    isNesting: readonly(isNesting),
-    draggedCard: readonly(draggedCard),
-    targetCardId: readonly(targetCardId),
-    canNest: readonly(canNest),
+    get isNesting() { return isNesting; },
+    get draggedCard() { return draggedCard; },
+    get targetCardId() { return targetCardId; },
+    get canNest() { return canNest; },
     startNest,
     setTarget,
     endNest,

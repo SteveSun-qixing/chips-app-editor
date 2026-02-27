@@ -5,9 +5,10 @@
  */
 
 export * from './resource-service';
-export * from './sdk-service';
 export * from './i18n-service';
 export * from './plugin-service';
 export * from './settings-service';
 export * from './card-persistence-service';
 export * from './editor-runtime-gateway';
+export * from './page-layout-service';
+export * from './card-cover-service';

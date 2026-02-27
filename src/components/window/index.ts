@@ -3,7 +3,8 @@
  * @module components/window
  */
 
-export { default as BaseWindow } from './BaseWindow.vue';
-export { default as CardWindow } from './CardWindow.vue';
-export { default as ToolWindow } from './ToolWindow.vue';
-export { default as WindowMenu } from './WindowMenu.vue';
+export { BaseWindow } from './BaseWindow';
+export { CardWindow } from './CardWindow';
+export { CardWindowBase } from './CardWindowBase';
+export { ToolWindow } from './ToolWindow';
+export { WindowMenu } from './WindowMenu';

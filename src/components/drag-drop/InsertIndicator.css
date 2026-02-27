@@ -1,0 +1,31 @@
+.insert-indicator {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.insert-indicator__line {
+    flex: 1;
+    background-color: var(--chips-color-primary, #1890ff);
+}
+
+.insert-indicator__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--chips-color-primary, #1890ff);
+    box-shadow: 0 0 0 2px var(--chips-color-bg-base, #fff);
+    flex-shrink: 0;
+}
+
+/* 水平方向 */
+.insert-indicator[style*="flex-direction: row"] .insert-indicator__line {
+    height: 2px;
+}
+
+/* 垂直方向 */
+.insert-indicator[style*="flex-direction: column"] .insert-indicator__line {
+    width: 2px;
+}

@@ -1,16 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { invokeEditorRuntimeMock, getEditorConnectorMock } = vi.hoisted(() => ({
+const { invokeEditorRuntimeMock } = vi.hoisted(() => ({
   invokeEditorRuntimeMock: vi.fn(),
-  getEditorConnectorMock: vi.fn(),
 }));
 
 vi.mock('@/services/editor-runtime-gateway', () => ({
   invokeEditorRuntime: invokeEditorRuntimeMock,
-}));
-
-vi.mock('@/services/sdk-service', () => ({
-  getEditorConnector: getEditorConnectorMock,
 }));
 
 const defaultWorkspaceRoot = '/ProductFinishedProductTestingSpace/TestWorkspace';
@@ -25,9 +20,7 @@ describe('resource-service copy/move protocol contract', () => {
   beforeEach(() => {
     vi.resetModules();
     invokeEditorRuntimeMock.mockReset();
-    getEditorConnectorMock.mockReset();
     invokeEditorRuntimeMock.mockResolvedValue({});
-    getEditorConnectorMock.mockResolvedValue({});
   });
 
   it('copy sends source/target fields for absolute paths', async () => {
@@ -125,5 +118,64 @@ describe('resource-service copy/move protocol contract', () => {
       code: 'SERVICE_MOVE_DENIED',
       message: 'move denied',
     });
+  });
+});
+
+describe('resource-service conversion runtime adapter', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    invokeEditorRuntimeMock.mockReset();
+  });
+
+  it('maps runtime invoke success to bridge request success response', async () => {
+    const { __createRuntimeRequestBridgeClientForTests } = await loadResourceServiceModule();
+    const runtimeInvoke = vi.fn().mockResolvedValue({ content: 'ok' });
+
+    const bridge = await __createRuntimeRequestBridgeClientForTests(runtimeInvoke);
+    const response = await bridge.request<{ content: string }>({
+      service: 'file',
+      method: 'read',
+      payload: { path: '/tmp/a.card' },
+    });
+
+    expect(runtimeInvoke).toHaveBeenCalledWith('file', 'read', { path: '/tmp/a.card' });
+    expect(response).toEqual({
+      success: true,
+      data: { content: 'ok' },
+    });
+  });
+
+  it('maps runtime invoke failure to bridge request error response', async () => {
+    const { __createRuntimeRequestBridgeClientForTests } = await loadResourceServiceModule();
+    const runtimeInvoke = vi.fn().mockRejectedValue({
+      code: 'SERVICE_FILE_READ_FAILED',
+      message: 'read failed',
+    });
+
+    const bridge = await __createRuntimeRequestBridgeClientForTests(runtimeInvoke);
+    const response = await bridge.request({
+      service: 'file',
+      method: 'read',
+      payload: { path: '/tmp/a.card' },
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toBe('read failed');
+  });
+
+  it('maps runtime timeout to bridge request timeout error response', async () => {
+    const { __createRuntimeRequestBridgeClientForTests } = await loadResourceServiceModule();
+    const runtimeInvoke = vi.fn(() => new Promise<never>(() => undefined));
+
+    const bridge = await __createRuntimeRequestBridgeClientForTests(runtimeInvoke);
+    const response = await bridge.request({
+      service: 'file',
+      method: 'read',
+      payload: { path: '/tmp/a.card' },
+      timeout: 5,
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.error).toContain('Bridge request timeout: file.read');
   });
 });

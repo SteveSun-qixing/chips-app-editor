@@ -3,9 +3,8 @@
  * @module services/i18n-service
  */
 
-import type { ChipsSDK } from '@chips/sdk';
-import { ref } from 'vue';
-import { getEditorSdk } from './sdk-service';
+
+import { getEditorI18nHook } from './editor-runtime-gateway';
 import { zhCN, enUS } from '@/i18n/editor';
 
 const DEFAULT_LOCALE = 'zh-CN';
@@ -15,11 +14,12 @@ const LOCAL_TRANSLATIONS: Record<string, TranslationTable> = {
   'en-US': enUS as TranslationTable,
 };
 
-let initialized = false;
-let sdkInstance: ChipsSDK | null = null;
+type EditorI18nHook = ReturnType<typeof getEditorI18nHook>;
+
+let i18nHook: EditorI18nHook | null = null;
 let currentLocale = normalizeLocale(getBrowserLocale() ?? DEFAULT_LOCALE);
 let pendingLocale: string | null = null;
-const i18nRevision = ref(0);
+let i18nRevision = 0;
 
 type TranslationTable = Record<string, unknown>;
 
@@ -51,6 +51,19 @@ function getTranslationTable(locale: string): TranslationTable {
     return LOCAL_TRANSLATIONS[normalized] ?? fallbackTable;
   }
   return LOCAL_TRANSLATIONS[normalized] ?? {};
+}
+
+function getRuntimeI18nHook(): EditorI18nHook | null {
+  if (i18nHook) {
+    return i18nHook;
+  }
+
+  try {
+    i18nHook = getEditorI18nHook();
+    return i18nHook;
+  } catch {
+    return null;
+  }
 }
 
 function resolveTranslationValue(
@@ -107,45 +120,35 @@ function getLocalTranslation(
 }
 
 export async function initializeEditorI18n(locale?: string): Promise<void> {
-  const sdk = await getEditorSdk();
-  sdkInstance = sdk;
-
-  if (!initialized) {
-    sdk.i18n.addTranslation('zh-CN', zhCN);
-    sdk.i18n.addTranslation('en-US', enUS);
-    initialized = true;
-  }
-
   const targetLocale = normalizeLocale(locale ?? pendingLocale ?? currentLocale);
   currentLocale = targetLocale;
   pendingLocale = null;
-  sdk.setLocale(targetLocale);
-  i18nRevision.value += 1;
+
+  const hook = getRuntimeI18nHook();
+  if (hook) {
+    try {
+      await hook.setCurrent(targetLocale);
+    } catch (error) {
+      console.warn('[EditorI18n] Failed to sync runtime locale:', error);
+    }
+  }
+  i18nRevision += 1;
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  const revision = i18nRevision.value;
+  const revision = i18nRevision;
   void revision;
-
-  if (!sdkInstance) {
-    return getLocalTranslation(key, params) ?? key;
-  }
-  const translated = sdkInstance.t(key, params);
-  if (translated !== key) {
-    return translated;
-  }
-  return getLocalTranslation(key, params) ?? translated;
+  return getLocalTranslation(key, params) ?? key;
 }
 
 export function setLocale(locale: string): void {
-  if (!sdkInstance) {
-    currentLocale = normalizeLocale(locale);
-    pendingLocale = currentLocale;
-    i18nRevision.value += 1;
-    return;
-  }
   currentLocale = normalizeLocale(locale);
   pendingLocale = null;
-  sdkInstance.setLocale(currentLocale);
-  i18nRevision.value += 1;
+  const hook = getRuntimeI18nHook();
+  if (hook) {
+    void hook.setCurrent(currentLocale).catch((error) => {
+      console.warn('[EditorI18n] Failed to set runtime locale:', error);
+    });
+  }
+  i18nRevision += 1;
 }

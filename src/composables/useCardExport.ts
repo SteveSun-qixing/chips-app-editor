@@ -1,13 +1,13 @@
 /**
- * useCardExport Composable
- * 
+ * useCardExport Hook
+ *
  * 封装卡片导出逻辑，提供统一的导出接口
  * 通过 SDK 调用导出功能，完全遵循中心路由原则
- * 
+ *
  * @module composables/useCardExport
  */
 
-import { ref, type Ref } from 'vue';
+import { useState, useCallback, useRef } from 'react';
 import type { ChipsSDK } from '@chips/sdk';
 import { t } from '@/services/i18n-service';
 
@@ -81,13 +81,13 @@ interface ExportProgressInfo {
  */
 export interface UseCardExportReturn {
   /** 当前导出状态 */
-  status: Ref<ExportStatus>;
+  status: ExportStatus;
   /** 导出进度 (0-100) */
-  progress: Ref<number>;
+  progress: number;
   /** 导出消息 */
-  message: Ref<string>;
+  message: string;
   /** 当前任务ID */
-  taskId: Ref<string | null>;
+  taskId: string | null;
   /** 执行导出 */
   executeExport: (
     cardId: string,
@@ -101,20 +101,19 @@ export interface UseCardExportReturn {
 }
 
 /**
- * 卡片导出 Composable
- * 
+ * 卡片导出 Hook
+ *
  * @param sdk - ChipsSDK 实例
  * @returns 导出状态和方法
- * 
+ *
  * @example
- * ```vue
- * <script setup>
+ * ```tsx
  * import { useCardExport } from '@/composables/useCardExport';
  * import { ChipsSDK } from '@chips/sdk';
- * 
- * const sdk = new ChipsSDK();
+ *
+ * const sdk = createSdk();
  * await sdk.initialize();
- * 
+ *
  * const {
  *   status,
  *   progress,
@@ -122,66 +121,75 @@ export interface UseCardExportReturn {
  *   executeExport,
  *   cancelExport
  * } = useCardExport(sdk);
- * 
+ *
  * // 导出卡片
  * const result = await executeExport(cardId, 'html', {
  *   outputPath: '/exports/my-card'
  * });
- * 
+ *
  * if (result.success) {
  *   console.warn('导出成功', result.outputPath);
  * }
- * </script>
  * ```
  */
 export function useCardExport(sdk: ChipsSDK): UseCardExportReturn {
   // 响应式状态
-  const status = ref<ExportStatus>('idle');
-  const progress = ref<number>(0);
-  const message = ref<string>('');
-  const taskId = ref<string | null>(null);
+  const [status, setStatus] = useState<ExportStatus>('idle');
+  const [progress, setProgress] = useState<number>(0);
+  const [message, setMessage] = useState<string>('');
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const taskIdRef = useRef<string | null>(null);
 
   /**
    * 执行导出操作
    */
-  async function executeExport(
+  const executeExport = useCallback(async (
     cardId: string,
     format: ExportFormat,
     options: ExportOptions
-  ): Promise<ExportResult> {
+  ): Promise<ExportResult> => {
     // 重置状态
-    status.value = 'exporting';
-    progress.value = 0;
-    message.value = t('export_panel.status_preparing');
-    taskId.value = null;
+    setStatus('exporting');
+    setProgress(0);
+    setMessage(t('export_panel.status_preparing'));
+    setTaskId(null);
+    taskIdRef.current = null;
 
     try {
       // 通过 SDK 的 CardAPI.export() 方法执行导出
-      // SDK 内部会通过 CoreConnector 路由到 Foundation
+      // SDK 内部会通过桥接层路由到 Foundation
       const result = await sdk.card.export(cardId, format, {
         ...options,
         onProgress: (progressInfo: ExportProgressInfo) => {
-          progress.value = progressInfo.percent || 0;
-          message.value = progressInfo.currentStep || t('export_panel.status_processing');
-          if (!taskId.value && progressInfo.taskId) {
-            taskId.value = progressInfo.taskId;
+          setProgress(progressInfo.percent || 0);
+          setMessage(progressInfo.currentStep || t('export_panel.status_processing'));
+          if (!taskIdRef.current && progressInfo.taskId) {
+            setTaskId(progressInfo.taskId);
+            taskIdRef.current = progressInfo.taskId;
           }
         },
       });
 
       // 处理结果
       if (result.success) {
-        status.value = 'success';
-        progress.value = 100;
-        message.value = t('export_panel.status_success', {
+        setStatus('success');
+        setProgress(100);
+        setMessage(t('export_panel.status_success', {
           path: result.outputPath || t('export_panel.status_done'),
-        });
+        }));
 
         // 5秒后自动重置状态
         setTimeout(() => {
-          if (status.value === 'success') {
-            reset();
-          }
+          setStatus((currentStatus) => {
+            if (currentStatus === 'success') {
+              setStatus('idle');
+              setProgress(0);
+              setMessage('');
+              setTaskId(null);
+              taskIdRef.current = null;
+            }
+            return currentStatus;
+          });
         }, 5000);
 
         return {
@@ -190,10 +198,10 @@ export function useCardExport(sdk: ChipsSDK): UseCardExportReturn {
           stats: result.stats,
         };
       } else {
-        status.value = 'error';
-        message.value = t('export_panel.status_failed', {
+        setStatus('error');
+        setMessage(t('export_panel.status_failed', {
           error: result.error?.message || t('export_panel.status_unknown_error'),
-        });
+        }));
 
         return {
           success: false,
@@ -202,9 +210,9 @@ export function useCardExport(sdk: ChipsSDK): UseCardExportReturn {
         };
       }
     } catch (error) {
-      status.value = 'error';
+      setStatus('error');
       const errorMessage = error instanceof Error ? error.message : t('export_panel.status_unknown_error');
-      message.value = t('export_panel.status_failed', { error: errorMessage });
+      setMessage(t('export_panel.status_failed', { error: errorMessage }));
 
       return {
         success: false,
@@ -214,24 +222,24 @@ export function useCardExport(sdk: ChipsSDK): UseCardExportReturn {
         },
       };
     }
-  }
+  }, [sdk]);
 
   /**
    * 取消导出操作
    */
-  async function cancelExport(): Promise<boolean> {
-    if (status.value !== 'exporting' || !taskId.value) {
+  const cancelExport = useCallback(async (): Promise<boolean> => {
+    if (status !== 'exporting' || !taskIdRef.current) {
       return false;
     }
 
     try {
       // 通过 SDK 取消转换任务
-      const cancelled = await sdk.conversion.cancelConversion(taskId.value);
+      const cancelled = await sdk.conversion.cancelConversion(taskIdRef.current);
 
       if (cancelled) {
-        status.value = 'cancelled';
-        message.value = t('export_panel.status_cancelled');
-        progress.value = 0;
+        setStatus('cancelled');
+        setMessage(t('export_panel.status_cancelled'));
+        setProgress(0);
 
         return true;
       }
@@ -241,17 +249,18 @@ export function useCardExport(sdk: ChipsSDK): UseCardExportReturn {
       console.error('Failed to cancel export:', error);
       return false;
     }
-  }
+  }, [sdk, status]);
 
   /**
    * 重置状态
    */
-  function reset(): void {
-    status.value = 'idle';
-    progress.value = 0;
-    message.value = '';
-    taskId.value = null;
-  }
+  const reset = useCallback(() => {
+    setStatus('idle');
+    setProgress(0);
+    setMessage('');
+    setTaskId(null);
+    taskIdRef.current = null;
+  }, []);
 
   return {
     status,

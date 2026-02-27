@@ -4,7 +4,7 @@
  * @description 负责创建、管理、销毁窗口
  */
 
-import { useUIStore, useCardStore } from '@/core/state';
+import { getUIStore, getCardStore } from '@/core/state';
 import type {
   WindowConfig,
   CardWindowConfig,
@@ -45,27 +45,18 @@ import { t } from '@/services/i18n-service';
  * ```
  */
 export class WindowManager {
-  private uiStore: ReturnType<typeof useUIStore> | null = null;
-  private cardStore: ReturnType<typeof useCardStore> | null = null;
-
   /**
-   * 获取 UI Store（延迟初始化）
+   * 获取 UI Store
    */
-  private getUIStore(): ReturnType<typeof useUIStore> {
-    if (!this.uiStore) {
-      this.uiStore = useUIStore();
-    }
-    return this.uiStore;
+  private getUIStoreInstance() {
+    return getUIStore();
   }
 
   /**
-   * 获取 Card Store（延迟初始化）
+   * 获取 Card Store
    */
-  private getCardStore(): ReturnType<typeof useCardStore> {
-    if (!this.cardStore) {
-      this.cardStore = useCardStore();
-    }
-    return this.cardStore;
+  private getCardStoreInstance() {
+    return getCardStore();
   }
 
   /**
@@ -78,12 +69,12 @@ export class WindowManager {
     cardId: string,
     options?: Partial<Omit<CardWindowConfig, 'id' | 'type' | 'cardId'>>
   ): string {
-    const uiStore = this.getUIStore();
-    const cardStore = this.getCardStore();
+    const uiStore = this.getUIStoreInstance();
+    const cardStoreInst = this.getCardStoreInstance();
 
     const windowId = generateScopedId('card-window');
     const position = this.getNextWindowPosition();
-    const cardInfo = cardStore.openCards.get(cardId);
+    const cardInfo = cardStoreInst.getState().openCards.get(cardId);
 
     const config: CardWindowConfig = {
       id: windowId,
@@ -116,7 +107,7 @@ export class WindowManager {
     component: string,
     options?: Partial<Omit<ToolWindowConfig, 'id' | 'type' | 'component'>>
   ): string {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
 
     const windowId = generateScopedId('tool-window');
     const position = this.getNextWindowPosition();
@@ -148,7 +139,7 @@ export class WindowManager {
    * @param windowId - 窗口 ID
    */
   closeWindow(windowId: string): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.removeWindow(windowId);
   }
 
@@ -157,7 +148,7 @@ export class WindowManager {
    * @param windowId - 窗口 ID
    */
   focusWindow(windowId: string): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.focusWindow(windowId);
   }
 
@@ -165,7 +156,7 @@ export class WindowManager {
    * 取消窗口焦点
    */
   blurWindow(): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.blurWindow();
   }
 
@@ -175,7 +166,7 @@ export class WindowManager {
    * @param position - 新位置
    */
   moveWindow(windowId: string, position: WindowPosition): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.moveWindow(windowId, position.x, position.y);
   }
 
@@ -185,7 +176,7 @@ export class WindowManager {
    * @param size - 新大小
    */
   resizeWindow(windowId: string, size: WindowSize): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.resizeWindow(windowId, size.width, size.height);
   }
 
@@ -195,7 +186,7 @@ export class WindowManager {
    * @param updates - 要更新的配置
    */
   updateWindow(windowId: string, updates: Partial<WindowConfig>): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.updateWindow(windowId, updates);
   }
 
@@ -205,7 +196,7 @@ export class WindowManager {
    * @param state - 窗口状态
    */
   setWindowState(windowId: string, state: WindowState): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.setWindowState(windowId, state);
   }
 
@@ -222,10 +213,11 @@ export class WindowManager {
    * @param windowId - 窗口 ID
    */
   restoreWindow(windowId: string): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
+    const s = uiStore.getState();
 
     // 如果是工具窗口，从最小化列表中移除
-    if (uiStore.minimizedTools.has(windowId)) {
+    if (uiStore.minimizedTools(s).has(windowId)) {
       uiStore.restoreTool(windowId);
     }
 
@@ -250,7 +242,7 @@ export class WindowManager {
    * @returns 窗口配置或 undefined
    */
   getWindow(windowId: string): WindowConfig | undefined {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     return uiStore.getWindow(windowId);
   }
 
@@ -259,8 +251,8 @@ export class WindowManager {
    * @returns 窗口配置数组
    */
   getAllWindows(): WindowConfig[] {
-    const uiStore = this.getUIStore();
-    return uiStore.windowList;
+    const uiStore = this.getUIStoreInstance();
+    return uiStore.getState().windowList;
   }
 
   /**
@@ -268,8 +260,8 @@ export class WindowManager {
    * @returns 卡片窗口配置数组
    */
   getCardWindows(): CardWindowConfig[] {
-    const uiStore = this.getUIStore();
-    return uiStore.cardWindows;
+    const uiStore = this.getUIStoreInstance();
+    return uiStore.cardWindows(uiStore.getState());
   }
 
   /**
@@ -277,8 +269,8 @@ export class WindowManager {
    * @returns 工具窗口配置数组
    */
   getToolWindows(): ToolWindowConfig[] {
-    const uiStore = this.getUIStore();
-    return uiStore.toolWindows;
+    const uiStore = this.getUIStoreInstance();
+    return uiStore.toolWindows(uiStore.getState());
   }
 
   /**
@@ -286,8 +278,8 @@ export class WindowManager {
    * @returns 焦点窗口配置或 null
    */
   getFocusedWindow(): WindowConfig | null {
-    const uiStore = this.getUIStore();
-    return uiStore.focusedWindow;
+    const uiStore = this.getUIStoreInstance();
+    return uiStore.focusedWindow(uiStore.getState());
   }
 
   /**
@@ -296,7 +288,7 @@ export class WindowManager {
    * @returns 是否存在
    */
   hasWindow(windowId: string): boolean {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     return uiStore.getWindow(windowId) !== undefined;
   }
 
@@ -305,8 +297,8 @@ export class WindowManager {
    * @returns 窗口位置
    */
   private getNextWindowPosition(): WindowPosition {
-    const uiStore = this.getUIStore();
-    const windows = uiStore.windowList;
+    const uiStore = this.getUIStoreInstance();
+    const windows = uiStore.getState().windowList;
     const offset = (windows.length % 10) * 30;
     return {
       x: 100 + offset,
@@ -325,8 +317,8 @@ export class WindowManager {
     startX?: number;
     startY?: number;
   }): void {
-    const uiStore = this.getUIStore();
-    const windows = uiStore.windowList.filter((w) => w.state === 'normal');
+    const uiStore = this.getUIStoreInstance();
+    const windows = uiStore.getState().windowList.filter((w) => w.state === 'normal');
 
     if (windows.length === 0) return;
 
@@ -366,8 +358,8 @@ export class WindowManager {
     offsetX?: number;
     offsetY?: number;
   }): void {
-    const uiStore = this.getUIStore();
-    const windows = uiStore.windowList.filter((w) => w.state === 'normal');
+    const uiStore = this.getUIStoreInstance();
+    const windows = uiStore.getState().windowList.filter((w) => w.state === 'normal');
 
     if (windows.length === 0) return;
 
@@ -392,8 +384,8 @@ export class WindowManager {
    * 关闭所有窗口
    */
   closeAllWindows(): void {
-    const uiStore = this.getUIStore();
-    const windows = [...uiStore.windowList];
+    const uiStore = this.getUIStoreInstance();
+    const windows = [...uiStore.getState().windowList];
     windows.forEach((window) => {
       this.closeWindow(window.id);
     });
@@ -403,8 +395,8 @@ export class WindowManager {
    * 最小化所有窗口
    */
   minimizeAllWindows(): void {
-    const uiStore = this.getUIStore();
-    const windows = uiStore.windowList.filter((w) => w.state === 'normal');
+    const uiStore = this.getUIStoreInstance();
+    const windows = uiStore.getState().windowList.filter((w) => w.state === 'normal');
     windows.forEach((window) => {
       this.minimizeWindow(window.id);
     });
@@ -414,8 +406,8 @@ export class WindowManager {
    * 恢复所有窗口
    */
   restoreAllWindows(): void {
-    const uiStore = this.getUIStore();
-    const windows = uiStore.windowList.filter((w) => w.state === 'minimized');
+    const uiStore = this.getUIStoreInstance();
+    const windows = uiStore.getState().windowList.filter((w) => w.state === 'minimized');
     windows.forEach((window) => {
       this.restoreWindow(window.id);
     });
@@ -445,7 +437,7 @@ export class WindowManager {
    * 重置窗口管理器状态
    */
   reset(): void {
-    const uiStore = this.getUIStore();
+    const uiStore = this.getUIStoreInstance();
     uiStore.clearWindows();
   }
 }

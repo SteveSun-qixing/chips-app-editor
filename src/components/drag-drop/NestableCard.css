@@ -1,0 +1,51 @@
+.nestable-card {
+    position: relative;
+    cursor: grab;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.nestable-card:active {
+    cursor: grabbing;
+}
+
+.nestable-card--dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+}
+
+.nestable-card--disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.nestable-card__hint {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-sm, 8px);
+    padding: var(--chips-spacing-md, 12px) var(--chips-spacing-lg, 16px);
+    background-color: var(--chips-color-primary, #1890ff);
+    color: var(--chips-color-on-primary, #ffffff);
+    border-radius: var(--chips-border-radius-base, 8px);
+    box-shadow: var(--chips-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+    pointer-events: none;
+    z-index: 10;
+}
+
+.nestable-card__hint--error {
+    background-color: var(--chips-color-error, #ff4d4f);
+    color: var(--chips-color-on-error, #ffffff);
+}
+
+.nestable-card__hint-icon {
+    font-size: 20px;
+}
+
+.nestable-card__hint-text {
+    font-size: var(--chips-font-size-sm, 14px);
+    font-weight: var(--chips-font-weight-medium, 500);
+    white-space: nowrap;
+}

@@ -6,7 +6,7 @@
 
 import type { Command } from '../command-manager';
 import type { BaseCardInfo } from '../state/stores/card';
-import { useCardStore } from '../state';
+import { getCardStore } from '../state';
 import { deepClone } from '@/utils';
 
 /**
@@ -36,12 +36,12 @@ export class AddBaseCardCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     cardStore.addBaseCard(this.cardId, this.baseCard, this.position);
   }
 
   async undo(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     cardStore.removeBaseCard(this.cardId, this.baseCard.id);
   }
 
@@ -80,7 +80,7 @@ export class RemoveBaseCardCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     const card = cardStore.getCard(this.cardId);
     
     if (card) {
@@ -100,13 +100,13 @@ export class RemoveBaseCardCommand implements Command {
 
   async undo(): Promise<void> {
     if (this.removedCard) {
-      const cardStore = useCardStore();
+      const cardStore = getCardStore();
       cardStore.addBaseCard(this.cardId, this.removedCard, this.originalPosition);
     }
   }
 
   async redo(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     cardStore.removeBaseCard(this.cardId, this.baseCardId);
   }
 
@@ -142,12 +142,12 @@ export class MoveBaseCardCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     cardStore.reorderBaseCards(this.cardId, this.fromIndex, this.toIndex);
   }
 
   async undo(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     // 撤销时反向移动
     cardStore.reorderBaseCards(this.cardId, this.toIndex, this.fromIndex);
   }
@@ -217,7 +217,7 @@ export class UpdateBaseCardConfigCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     const card = cardStore.getCard(this.cardId);
     
     if (card) {
@@ -234,7 +234,7 @@ export class UpdateBaseCardConfigCommand implements Command {
 
   async undo(): Promise<void> {
     if (this.oldConfig !== null) {
-      const cardStore = useCardStore();
+      const cardStore = getCardStore();
       const card = cardStore.getCard(this.cardId);
       
       if (card) {
@@ -248,7 +248,7 @@ export class UpdateBaseCardConfigCommand implements Command {
   }
 
   async redo(): Promise<void> {
-    const cardStore = useCardStore();
+    const cardStore = getCardStore();
     const card = cardStore.getCard(this.cardId);
     
     if (card) {

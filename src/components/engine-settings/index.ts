@@ -11,7 +11,7 @@
  * - 各面板组件（供外部按需引用）
  */
 
-export { default as EngineSettingsDialog } from './EngineSettingsDialog.vue';
+export { EngineSettingsDialog } from './EngineSettingsDialog';
 export { builtinPanelDefinitions } from './settings-registry';
 export {
   LanguageSettingsPanel,

@@ -3,9 +3,9 @@
  * @module components/engine-settings/panels
  */
 
-export { default as LanguageSettingsPanel } from './LanguageSettingsPanel.vue';
-export { default as ThemeSettingsPanel } from './ThemeSettingsPanel.vue';
-export { default as LayoutSettingsPanel } from './LayoutSettingsPanel.vue';
-export { default as ToolsSettingsPanel } from './ToolsSettingsPanel.vue';
-export { default as FileModeSettingsPanel } from './FileModeSettingsPanel.vue';
-export { default as AboutPanel } from './AboutPanel.vue';
+export { LanguageSettingsPanel } from './LanguageSettingsPanel';
+export { ThemeSettingsPanel } from './ThemeSettingsPanel';
+export { LayoutSettingsPanel } from './LayoutSettingsPanel';
+export { ToolsSettingsPanel } from './ToolsSettingsPanel';
+export { FileModeSettingsPanel } from './FileModeSettingsPanel';
+export { AboutPanel } from './AboutPanel';

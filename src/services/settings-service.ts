@@ -11,12 +11,10 @@
  * 通过 SettingsPanelDefinition.onChange 引用。
  */
 
-import type { ThemeMetadata } from '@chips/sdk';
-import { getEditorSdk } from './sdk-service';
-import { invokeEditorRuntime } from './editor-runtime-gateway';
+import { getEditorThemeHook, invokeEditorRuntime } from './editor-runtime-gateway';
 import { setLocale as setEditorLocale } from './i18n-service';
-import { useSettingsStore } from '@/core/state';
-import { useUIStore, useEditorStore } from '@/core/state';
+import { getSettingsStore } from '@/core/state';
+import { getUIStore, getEditorStore } from '@/core/state';
 import type {
   ThemeSettingsData,
   LanguageSettingsData,
@@ -48,7 +46,7 @@ let initialized = false;
 export async function initializeSettingsService(): Promise<void> {
   if (initialized) return;
 
-  const settingsStore = useSettingsStore();
+  const settingsStore = getSettingsStore();
 
   await restorePersistedSettings(settingsStore);
 
@@ -136,7 +134,7 @@ export function handleLayoutChange(
   oldData: LayoutSettingsData,
 ): void {
   if (newData.currentLayout !== oldData.currentLayout) {
-    const editorStore = useEditorStore();
+    const editorStore = getEditorStore();
     editorStore.setLayout(newData.currentLayout as 'infinite-canvas' | 'workbench');
     schedulePersistSettings();
   }
@@ -159,24 +157,24 @@ export function handleFileModeChange(
 /**
  * 获取可用的主题列表
  *
- * 从 SDK ThemeManager 获取所有已注册的主题，
+ * 通过 Runtime Theme Hook 获取主题目录，
  * 转换为 UI 展示用的 ThemeOption 格式。
  */
 export async function getAvailableThemes(): Promise<ThemeOption[]> {
-  const settingsStore = useSettingsStore();
+  const settingsStore = getSettingsStore();
   const themeData = settingsStore.getData<ThemeSettingsData>('theme');
   const activeThemeId = themeData?.currentThemeId ?? 'default-light';
 
   try {
-    const sdk = await getEditorSdk();
-    const themeList: ThemeMetadata[] = sdk.themes.listThemes();
+    const themeHook = getEditorThemeHook();
+    const themeList = await themeHook.list();
 
-    if (themeList.length === 0) {
+    if (!themeList.themes || themeList.themes.length === 0) {
       return getDefaultThemeOptions(activeThemeId);
     }
 
-    return themeList.map((meta) =>
-      createThemeOptionFromMetadata(meta, activeThemeId),
+    return themeList.themes.map((meta) =>
+      createThemeOptionFromRuntime(meta, activeThemeId),
     );
   } catch (error) {
     console.error('[SettingsService] Failed to load themes:', error);
@@ -185,30 +183,30 @@ export async function getAvailableThemes(): Promise<ThemeOption[]> {
 }
 
 /**
- * 应用主题到 SDK ThemeManager 和 UI Store
+ * 应用主题到 Runtime Theme Hook 和 UI Store
  */
 async function applyThemeToSDK(themeId: string): Promise<void> {
-  const uiStore = useUIStore();
+  const uiStore = getUIStore();
+  const themeHook = getEditorThemeHook();
+  let activeThemeId = themeId;
 
   try {
-    const sdk = await getEditorSdk();
-
-    if (sdk.themes.hasTheme(themeId)) {
-      sdk.themes.setTheme(themeId);
-      sdk.themes.applyToDOM();
-    } else {
-      console.warn(
-        `[SettingsService] Theme "${themeId}" not found, falling back to default-light`,
-      );
-      sdk.themes.setTheme('default-light');
-      sdk.themes.applyToDOM();
-    }
+    await themeHook.apply(themeId);
   } catch (error) {
-    console.error('[SettingsService] Failed to apply theme to SDK:', error);
+    console.warn(
+      `[SettingsService] Theme "${themeId}" apply failed, falling back to default-light`,
+      error,
+    );
+    activeThemeId = 'default-light';
+    try {
+      await themeHook.apply(activeThemeId);
+    } catch (fallbackError) {
+      console.error('[SettingsService] Failed to apply fallback theme:', fallbackError);
+    }
   }
 
   // 同步到 UI Store
-  uiStore.setTheme(themeId);
+  uiStore.setTheme(activeThemeId);
 }
 
 /**
@@ -216,12 +214,16 @@ async function applyThemeToSDK(themeId: string): Promise<void> {
  */
 async function detectAndApplySystemTheme(): Promise<void> {
   try {
-    const sdk = await getEditorSdk();
-    const systemPreference = sdk.themes.detectSystemTheme();
+    const systemPreference =
+      typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
     const targetThemeId =
       systemPreference === 'dark' ? 'default-dark' : 'default-light';
 
-    const settingsStore = useSettingsStore();
+    const settingsStore = getSettingsStore();
     settingsStore.updateData<ThemeSettingsData>('theme', {
       currentThemeId: targetThemeId,
     });
@@ -244,7 +246,7 @@ function startSystemThemeWatcher(): void {
   const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
   const handler = (): void => {
-    const settingsStore = useSettingsStore();
+    const settingsStore = getSettingsStore();
     const themeData = settingsStore.getData<ThemeSettingsData>('theme');
     if (themeData?.followSystem) {
       detectAndApplySystemTheme();
@@ -275,10 +277,10 @@ function stopSystemThemeWatcher(): void {
  * 应用语言设置到 UI
  */
 function applyLanguageToUI(langData: LanguageSettingsData): void {
-  const editorStore = useEditorStore();
+  const editorStore = getEditorStore();
 
   // 更新语言
-  if (langData.locale !== editorStore.locale) {
+  if (langData.locale !== editorStore.getState().locale) {
     editorStore.setLocale(langData.locale);
   }
   setEditorLocale(langData.locale);
@@ -295,7 +297,7 @@ function applyLanguageToUI(langData: LanguageSettingsData): void {
 }
 
 async function restorePersistedSettings(
-  settingsStore: ReturnType<typeof useSettingsStore>,
+  settingsStore: ReturnType<typeof getSettingsStore>,
 ): Promise<void> {
   try {
     const response = await invokeEditorRuntime<{ value?: unknown }>(
@@ -325,7 +327,7 @@ function schedulePersistSettings(): void {
 
 async function persistSettings(): Promise<void> {
   try {
-    const settingsStore = useSettingsStore();
+    const settingsStore = getSettingsStore();
     await invokeEditorRuntime('config', 'set', {
       key: SETTINGS_CONFIG_KEY,
       scope: 'user',
@@ -353,14 +355,25 @@ function getDefaultThemeOptions(activeThemeId: string): ThemeOption[] {
 /**
  * 从 SDK 元数据创建主题选项
  */
-function createThemeOptionFromMetadata(
-  meta: ThemeMetadata,
+function inferThemeType(themeId: string): 'light' | 'dark' | 'auto' {
+  const normalized = themeId.toLowerCase();
+  if (normalized.includes('dark') || normalized.includes('obsidian')) {
+    return 'dark';
+  }
+  if (normalized.includes('light') || normalized.includes('default')) {
+    return 'light';
+  }
+  return 'auto';
+}
+
+function createThemeOptionFromRuntime(
+  meta: { id: string; name: string; version?: string },
   activeThemeId: string,
 ): ThemeOption {
   return {
     id: meta.id,
     name: meta.name,
-    type: meta.type,
+    type: inferThemeType(meta.id),
     isActive: meta.id === activeThemeId,
     previewPrimary: undefined,
     previewBackground: undefined,

@@ -1,5 +1,7 @@
-declare module '@chips/components' {
-  import type { Component } from 'vue';
+declare module '@chips/component-library' {
+  import type { ComponentType, FC } from 'react';
+
+  type Component = ComponentType<any>;
 
   // 基础组件
   export const Button: Component;

@@ -3,10 +3,10 @@
  * @module layouts/infinite-canvas
  */
 
-export { default as InfiniteCanvas } from './InfiniteCanvas.vue';
-export { default as DesktopLayer } from './DesktopLayer.vue';
-export { default as WindowLayer } from './WindowLayer.vue';
-export { default as ZoomControl } from './ZoomControl.vue';
+export { InfiniteCanvas } from './InfiniteCanvas';
+export { DesktopLayer } from './DesktopLayer';
+export { WindowLayer } from './WindowLayer';
+export { ZoomControl } from './ZoomControl';
 export { useCanvasControls } from './use-canvas';
 export type {
   CanvasControlsOptions,

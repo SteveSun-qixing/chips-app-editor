@@ -116,7 +116,7 @@ export interface FormField {
   default?: unknown;
   /** 是否必填 */
   required?: boolean;
-  /** 占位符 */
+  /** 输入提示 */
   placeholder?: string;
   /** 下拉选项 */
   options?: Array<{ label: string; value: unknown }>;

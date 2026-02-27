@@ -8,7 +8,7 @@ import type { ChipsSDK, Card as SDKCard, Tag } from '@chips/sdk';
 import type { SDKConnectorOptions } from './connector';
 import { SDKConnector, createConnector } from './connector';
 import { EventEmitter, createEventEmitter } from './event-manager';
-import { useEditorStore, useCardStore, useUIStore } from './state';
+import { getEditorStore, getCardStore, getUIStore } from './state';
 import { resourceService } from '@/services/resource-service';
 import { requireCardPath } from '@/services/card-path-service';
 import {
@@ -57,7 +57,7 @@ export interface SaveCardOptions {
  * 
  * 负责协调各模块，提供统一的编辑器 API：
  * - 连接管理：通过 SDKConnector 与 Chips-SDK 通信
- * - 状态管理：通过 Pinia Store 管理编辑器状态
+ * - 状态管理：通过框架无关 Store 管理编辑器状态
  * - 事件系统：通过 EventEmitter 处理内部事件
  * 
  * @example
@@ -92,11 +92,11 @@ export class ChipsEditor {
   /** SDK 连接器 */
   private connector: SDKConnector;
   /** 编辑器状态 Store */
-  private editorStore: ReturnType<typeof useEditorStore>;
+  private editorStore: ReturnType<typeof getEditorStore>;
   /** 卡片状态 Store */
-  private cardStore: ReturnType<typeof useCardStore>;
+  private cardStore: ReturnType<typeof getCardStore>;
   /** UI 状态 Store */
-  private uiStore: ReturnType<typeof useUIStore>;
+  private uiStore: ReturnType<typeof getUIStore>;
   /** 自动保存定时器 */
   private autoSaveTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -123,10 +123,10 @@ export class ChipsEditor {
     };
     this.connector = createConnector(this.events, connectorOptions);
 
-    // 获取 Pinia stores（需要在 Vue 应用中使用）
-    this.editorStore = useEditorStore();
-    this.cardStore = useCardStore();
-    this.uiStore = useUIStore();
+    // 获取 Store facades
+    this.editorStore = getEditorStore();
+    this.cardStore = getCardStore();
+    this.uiStore = getUIStore();
 
     // 设置事件处理器
     this.setupEventHandlers();
@@ -140,7 +140,7 @@ export class ChipsEditor {
    * @throws {Error} 如果编辑器已初始化或正在初始化
    */
   async initialize(): Promise<void> {
-    if (this.editorStore.state !== 'idle') {
+    if (this.editorStore.getState().state !== 'idle') {
       throw new Error('Editor already initialized or initializing');
     }
 
@@ -195,7 +195,7 @@ export class ChipsEditor {
     this.editorStore.reset();
 
     this.editorStore.setState('destroyed');
-    
+
     // 先发出事件，再清理事件系统
     this.events.emit('editor:destroyed', {});
     this.events.clear();
@@ -392,7 +392,7 @@ export class ChipsEditor {
     this.cardStore.updateFilePath(cardId, path);
 
     // 检查是否还有未保存的卡片
-    if (!this.cardStore.hasModifiedCards) {
+    if (!this.cardStore.hasModifiedCards(this.cardStore.getState())) {
       this.editorStore.markSaved();
     }
 
@@ -480,7 +480,7 @@ export class ChipsEditor {
    * 保存所有修改过的卡片
    */
   async saveAllCards(): Promise<void> {
-    const modifiedCards = this.cardStore.modifiedCards;
+    const modifiedCards = this.cardStore.modifiedCards(this.cardStore.getState());
     for (const card of modifiedCards) {
       await this.saveCard(card.id);
     }
@@ -505,7 +505,7 @@ export class ChipsEditor {
    * @returns 当前布局类型
    */
   getLayout(): LayoutType {
-    return this.editorStore.currentLayout;
+    return this.editorStore.getState().currentLayout;
   }
 
   // ==================== 窗口操作 ====================
@@ -601,28 +601,28 @@ export class ChipsEditor {
    * 获取编辑器状态
    */
   get state(): EditorState {
-    return this.editorStore.state;
+    return this.editorStore.getState().state;
   }
 
   /**
    * 是否就绪
    */
   get isReady(): boolean {
-    return this.editorStore.isReady;
+    return this.editorStore.isReady(this.editorStore.getState());
   }
 
   /**
    * 是否已连接
    */
   get isConnected(): boolean {
-    return this.editorStore.isConnected;
+    return this.editorStore.getState().isConnected;
   }
 
   /**
    * 是否有未保存的更改
    */
   get hasUnsavedChanges(): boolean {
-    return this.editorStore.hasUnsavedChanges || this.cardStore.hasModifiedCards;
+    return this.editorStore.getState().hasUnsavedChanges || this.cardStore.hasModifiedCards(this.cardStore.getState());
   }
 
   /**
@@ -658,7 +658,7 @@ export class ChipsEditor {
    * 确保编辑器已就绪
    */
   private ensureReady(): void {
-    if (!this.editorStore.isReady) {
+    if (!this.editorStore.isReady(this.editorStore.getState())) {
       throw new Error('Editor is not ready');
     }
     if (!this.connector.connected) {
@@ -675,7 +675,7 @@ export class ChipsEditor {
     }
 
     this.autoSaveTimer = setInterval(async () => {
-      if (this.cardStore.hasModifiedCards) {
+      if (this.cardStore.hasModifiedCards(this.cardStore.getState())) {
         this.log('Auto-saving modified cards...');
         try {
           await this.saveAllCards();

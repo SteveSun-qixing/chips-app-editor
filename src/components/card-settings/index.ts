@@ -3,4 +3,4 @@
  * @module components/card-settings
  */
 
-export { default as CardSettingsDialog } from './CardSettingsDialog.vue';
+export { CardSettingsDialog } from './CardSettingsDialog';

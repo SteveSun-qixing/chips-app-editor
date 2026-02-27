@@ -1,11 +1,9 @@
 /**
  * 封面快速制作器模块导出
  * @module components/cover-maker
+ *
+ * 注意：CoverMaker 组件仍在归档状态，等待后续迁移
  */
-
-export { default as CoverMaker } from './CoverMaker.vue';
-export { default as TemplateGrid } from './TemplateGrid.vue';
-export { default as TemplatePreview } from './TemplatePreview.vue';
 
 // 类型导出
 export type {
@@ -27,3 +25,6 @@ export {
   generateImageCoverHtml,
   generateDefaultCoverHtml,
 } from './templates';
+
+// CoverMaker 组件已归档至 archive/legacy-vue/components/cover-maker/
+// 待 React 版本 CoverMaker 实现后在此导出

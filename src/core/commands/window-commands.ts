@@ -6,7 +6,7 @@
 
 import type { Command } from '../command-manager';
 import type { WindowConfig, WindowPosition, WindowSize } from '@/types';
-import { useUIStore } from '../state';
+import { getUIStore } from '../state';
 import { deepClone } from '@/utils';
 
 /**
@@ -30,12 +30,12 @@ export class CreateWindowCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     uiStore.addWindow(this.windowConfig);
   }
 
   async undo(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     uiStore.removeWindow(this.windowConfig.id);
   }
 
@@ -70,7 +70,7 @@ export class CloseWindowCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     const window = uiStore.getWindow(this.windowId);
     
     if (window) {
@@ -83,13 +83,13 @@ export class CloseWindowCommand implements Command {
 
   async undo(): Promise<void> {
     if (this.savedConfig) {
-      const uiStore = useUIStore();
+      const uiStore = getUIStore();
       uiStore.addWindow(this.savedConfig);
     }
   }
 
   async redo(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     uiStore.removeWindow(this.windowId);
   }
 
@@ -123,7 +123,7 @@ export class MoveWindowCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     const window = uiStore.getWindow(this.windowId);
     
     if (window) {
@@ -135,13 +135,13 @@ export class MoveWindowCommand implements Command {
 
   async undo(): Promise<void> {
     if (this.oldPosition) {
-      const uiStore = useUIStore();
+      const uiStore = getUIStore();
       uiStore.moveWindow(this.windowId, this.oldPosition.x, this.oldPosition.y);
     }
   }
 
   async redo(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     uiStore.moveWindow(this.windowId, this.newPosition.x, this.newPosition.y);
   }
 
@@ -195,7 +195,7 @@ export class ResizeWindowCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     const window = uiStore.getWindow(this.windowId);
     
     if (window) {
@@ -207,13 +207,13 @@ export class ResizeWindowCommand implements Command {
 
   async undo(): Promise<void> {
     if (this.oldSize) {
-      const uiStore = useUIStore();
+      const uiStore = getUIStore();
       uiStore.resizeWindow(this.windowId, this.oldSize.width, this.oldSize.height);
     }
   }
 
   async redo(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     uiStore.resizeWindow(this.windowId, this.newSize.width, this.newSize.height);
   }
 
@@ -267,7 +267,7 @@ export class SetWindowStateCommand implements Command {
   }
 
   async execute(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     const window = uiStore.getWindow(this.windowId);
     
     if (window) {
@@ -279,13 +279,13 @@ export class SetWindowStateCommand implements Command {
 
   async undo(): Promise<void> {
     if (this.oldState) {
-      const uiStore = useUIStore();
+      const uiStore = getUIStore();
       uiStore.setWindowState(this.windowId, this.oldState);
     }
   }
 
   async redo(): Promise<void> {
-    const uiStore = useUIStore();
+    const uiStore = getUIStore();
     uiStore.setWindowState(this.windowId, this.newState);
   }
 

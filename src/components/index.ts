@@ -89,10 +89,8 @@ export type {
 export { HistoryPanel } from './history-panel';
 
 // ==================== 封面制作器组件 ====================
+// 注意：CoverMaker, TemplateGrid, TemplatePreview 组件仍在归档状态，等待后续迁移
 export {
-  CoverMaker,
-  TemplateGrid,
-  TemplatePreview,
   templates,
   getTemplateById,
   generateCoverHtml,
@@ -110,3 +108,6 @@ export type {
   CoverMakerProps,
   CoverMakerEmits,
 } from './cover-maker';
+
+// TODO: 等待 CoverMaker 组件迁移完成后取消注释
+// export { CoverMaker, TemplateGrid, TemplatePreview } from './cover-maker';

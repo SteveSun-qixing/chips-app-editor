@@ -1,0 +1,36 @@
+.sortable-list {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.sortable-list--vertical {
+    flex-direction: column;
+}
+
+.sortable-list--horizontal {
+    flex-direction: row;
+}
+
+.sortable-list--disabled {
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+.sortable-list__item {
+    cursor: grab;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.sortable-list__item:active {
+    cursor: grabbing;
+}
+
+.sortable-list__item--dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+}
+
+.sortable-list--sorting .sortable-list__item:not(.sortable-list__item--dragging) {
+    transition: transform 0.2s ease;
+}

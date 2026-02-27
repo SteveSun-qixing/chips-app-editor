@@ -1,0 +1,264 @@
+.file-manager {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background-color: var(--chips-color-bg-secondary, #f8f9fa);
+}
+
+/* 工具栏 */
+.file-manager__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--chips-spacing-sm, 8px);
+    padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 12px);
+    background-color: var(--chips-color-bg-primary, #fff);
+    border-bottom: 1px solid var(--chips-color-border-light, #f0f0f0);
+    flex-wrap: nowrap;
+}
+
+.file-manager__toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-xs, 4px);
+    flex-shrink: 0;
+}
+
+.file-manager__toolbar-divider {
+    width: 1px;
+    height: 20px;
+    background-color: var(--chips-color-border, #e0e0e0);
+    margin: 0 var(--chips-spacing-xs, 4px);
+}
+
+.file-manager__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--chips-spacing-xs, 4px);
+    border: none;
+    background: transparent;
+    border-radius: var(--chips-radius-sm, 4px);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.file-manager__btn:hover:not(:disabled) {
+    background-color: var(--chips-color-bg-hover, rgba(0, 0, 0, 0.05));
+}
+
+.file-manager__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.file-manager__btn--icon {
+    width: 28px;
+    height: 28px;
+    font-size: 16px;
+}
+
+/* 搜索框行（单独一行） */
+.file-manager__search-row {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-sm, 8px);
+    padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 12px);
+    background-color: var(--chips-color-bg-primary, #fff);
+    border-bottom: 1px solid var(--chips-color-border-light, #f0f0f0);
+}
+
+.file-manager__search-input {
+    flex: 1;
+}
+
+.file-manager__search-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-radius: var(--chips-radius-sm, 4px);
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--chips-color-text-secondary, #666);
+    transition: background-color 0.15s ease, color 0.15s ease;
+    flex-shrink: 0;
+}
+
+.file-manager__search-close:hover {
+    background-color: var(--chips-color-bg-hover, rgba(0, 0, 0, 0.05));
+    color: var(--chips-color-text-primary, #1a1a1a);
+}
+
+.file-manager__search:focus-within {
+    background-color: var(--chips-color-bg-primary, #fff);
+    border-color: var(--chips-color-primary, #1890ff);
+}
+
+.file-manager__search-input {
+    flex: 1;
+}
+
+.file-manager__search-input .chips-input__wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-xs, 4px);
+    padding: var(--chips-spacing-xs, 4px) var(--chips-spacing-sm, 8px);
+    background-color: var(--chips-color-bg-secondary, #f5f5f5);
+    border-radius: var(--chips-radius-sm, 4px);
+    border: 1px solid transparent;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.file-manager__search-input .chips-input__wrapper:focus-within {
+    background-color: var(--chips-color-bg-primary, #fff);
+    border-color: var(--chips-color-primary, #1890ff);
+}
+
+.file-manager__search-input .chips-input__prefix {
+    font-size: 12px;
+    color: var(--chips-color-text-tertiary, #999);
+}
+
+.file-manager__search-input .chips-input__inner {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: var(--chips-font-size-sm, 14px);
+    color: var(--chips-color-text-primary, #1a1a1a);
+    outline: none;
+}
+
+.file-manager__search-input .chips-input__inner::placeholder {
+    color: var(--chips-color-text-tertiary, #999);
+}
+
+.file-manager__search-input .chips-input__clear {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    background: var(--chips-color-text-tertiary, #999);
+    color: var(--chips-color-bg-primary, #fff);
+    border-radius: var(--chips-radius-full, 9999px);
+    font-size: 10px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.file-manager__search-input .chips-input__clear:hover {
+    background-color: var(--chips-color-text-secondary, #666);
+}
+
+/* 内容区 */
+.file-manager__content {
+    flex: 1;
+    overflow: hidden;
+    background-color: var(--chips-color-bg-primary, #fff);
+}
+
+/* 加载状态 */
+.file-manager__loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: var(--chips-spacing-sm, 8px);
+    color: var(--chips-color-text-tertiary, #999);
+}
+
+.file-manager__loading-spinner {
+    font-size: 24px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* 状态栏 */
+.file-manager__statusbar {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-xs, 4px);
+    padding: var(--chips-spacing-xs, 4px) var(--chips-spacing-sm, 8px);
+    background-color: var(--chips-color-bg-secondary, #f8f9fa);
+    border-top: 1px solid var(--chips-color-border-light, #f0f0f0);
+    font-size: var(--chips-font-size-xs, 12px);
+    color: var(--chips-color-text-tertiary, #999);
+}
+
+.file-manager__statusbar-count {
+    font-weight: var(--chips-font-weight-medium, 500);
+    color: var(--chips-color-text-secondary, #666);
+}
+
+/* 空状态 */
+.file-manager__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: var(--chips-spacing-sm, 8px);
+    padding: var(--chips-spacing-xl, 32px);
+    color: var(--chips-color-text-tertiary, #999);
+}
+
+.file-manager__empty-icon {
+    font-size: 48px;
+    opacity: 0.5;
+}
+
+.file-manager__empty-title {
+    font-size: var(--chips-font-size-md, 16px);
+    font-weight: var(--chips-font-weight-medium, 500);
+    color: var(--chips-color-text-secondary, #666);
+}
+
+.file-manager__empty-hint {
+    font-size: var(--chips-font-size-sm, 14px);
+    text-align: center;
+    line-height: 1.5;
+    color: var(--chips-color-text-tertiary, #999);
+}
+
+.file-manager__empty-actions {
+    display: flex;
+    gap: var(--chips-spacing-sm, 8px);
+    margin-top: var(--chips-spacing-md, 16px);
+}
+
+.file-manager__empty-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-xs, 4px);
+    padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 16px);
+    border: 1px solid var(--chips-color-border, #e0e0e0);
+    background: var(--chips-color-bg-primary, #fff);
+    border-radius: var(--chips-radius-base, 6px);
+    font-size: var(--chips-font-size-sm, 14px);
+    color: var(--chips-color-text-secondary, #666);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.file-manager__empty-btn:hover {
+    background-color: var(--chips-color-bg-secondary, #f5f5f5);
+    border-color: var(--chips-color-primary, #1890ff);
+    color: var(--chips-color-primary, #1890ff);
+}

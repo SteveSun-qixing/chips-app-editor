@@ -7,14 +7,11 @@
  * 编辑器通过 Bridge API 查询已安装的卡片插件，并动态加载其编辑器组件。
  */
 
-import type { Component } from 'vue';
+import type { ComponentType } from 'react';
 import type {
   ChipsCardPluginRuntimeContext,
-  ChipsSDK,
-  PluginRegistration,
 } from '@chips/sdk';
 import { parse as parseYaml } from 'yaml';
-import { getEditorSdk } from './sdk-service';
 import { getEditorPluginHook } from './editor-runtime-gateway';
 
 /** 卡片插件信息（从 Bridge API 获取） */
@@ -33,7 +30,7 @@ interface RuntimeVocabularyResult {
 export interface EditorRuntime {
   mode: 'component' | 'iframe';
   pluginId: string;
-  component?: Component;
+  component?: ComponentType;
   iframeUrl?: string;
 }
 
@@ -50,13 +47,12 @@ interface EditorPluginDefinition {
 /** 已发现的卡片插件缓存 */
 let discoveredPlugins: EditorPluginDefinition[] = [];
 let pluginsDiscovered = false;
-let pluginsRegistered = false;
 
 /** 插件 ID 到 cardType 的别名映射 */
 const pluginIdToCardType = new Map<string, string>();
 
 /** 编辑器组件缓存 */
-const componentCache = new Map<string, Component>();
+const componentCache = new Map<string, ComponentType>();
 const runtimeCache = new Map<string, EditorRuntime>();
 
 /** 卡片类型到插件信息的缓存 */
@@ -407,50 +403,6 @@ async function getCardRuntimeContext(
   return plugin.getCardRuntimeContext(cardType, locale);
 }
 
-async function registerPluginsToSdk(sdk: ChipsSDK, plugins: EditorPluginDefinition[]): Promise<void> {
-  for (const plugin of plugins) {
-    const registration: PluginRegistration = {
-      id: plugin.id,
-      metadata: {
-        id: plugin.id,
-        name: plugin.name,
-        version: plugin.version,
-        description: plugin.description,
-        keywords: plugin.keywords,
-        chipStandardsVersion: '1.0.0',
-      },
-      activate: async () => {},
-    };
-
-    try {
-      sdk.registerPlugin(registration);
-    } catch {
-      // ignore duplicate registration
-    }
-
-    try {
-      await sdk.plugins.enable(plugin.id);
-    } catch {
-      // ignore enable errors
-    }
-  }
-}
-
-/**
- * 确保插件已注册到 SDK
- */
-async function ensureRegistered(): Promise<ChipsSDK> {
-  const sdk = await getEditorSdk();
-
-  if (!pluginsRegistered) {
-    const plugins = await discoverCardPlugins();
-    await registerPluginsToSdk(sdk, plugins);
-    pluginsRegistered = true;
-  }
-
-  return sdk;
-}
-
 /**
  * 获取指定卡片类型的编辑器组件
  *
@@ -460,7 +412,7 @@ async function ensureRegistered(): Promise<ChipsSDK> {
  * @param cardType - 卡片类型标识
  * @returns 编辑器 Vue 组件，如果未找到则返回 null
  */
-export async function getEditorComponent(cardType: string): Promise<Component | null> {
+export async function getEditorComponent(cardType: string): Promise<ComponentType | null> {
   const runtime = await getEditorRuntime(cardType);
   if (!runtime || runtime.mode !== 'component') {
     return null;
@@ -469,7 +421,9 @@ export async function getEditorComponent(cardType: string): Promise<Component | 
 }
 
 export async function getEditorRuntime(cardType: string): Promise<EditorRuntime | null> {
-  const sdk = await ensureRegistered();
+  if (!pluginsDiscovered) {
+    await discoverCardPlugins();
+  }
 
   if (runtimeCache.has(cardType)) {
     return runtimeCache.get(cardType) ?? null;
@@ -498,10 +452,7 @@ export async function getEditorRuntime(cardType: string): Promise<EditorRuntime 
 
   let pluginInfo = await getCardPluginInfo(normalizedCardType);
   if (!pluginInfo) {
-    const refreshedPlugins = await discoverCardPlugins({ force: true });
-    if (refreshedPlugins.length > 0) {
-      await registerPluginsToSdk(sdk, refreshedPlugins);
-    }
+    await discoverCardPlugins({ force: true });
     normalizedCardType = normalizeCardType(cardType);
     pluginInfo = await getCardPluginInfo(normalizedCardType, { force: true });
   }
@@ -532,7 +483,7 @@ export async function getEditorRuntime(cardType: string): Promise<EditorRuntime 
 
   try {
     const module = await import(/* @vite-ignore */ resolvedEditorPath);
-    const component = (module as { default: Component }).default;
+    const component = (module as { default: ComponentType }).default;
     componentCache.set(normalizedCardType, component);
     componentCache.set(cardType, component);
     const runtime: EditorRuntime = {
@@ -649,7 +600,6 @@ export function getRegisteredPlugins(): EditorPluginDefinition[] {
 export function __resetPluginServiceForTests(): void {
   discoveredPlugins = [];
   pluginsDiscovered = false;
-  pluginsRegistered = false;
   pluginIdToCardType.clear();
   componentCache.clear();
   runtimeCache.clear();

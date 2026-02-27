@@ -71,6 +71,15 @@ describe('SDKConnector', () => {
     it('should do nothing if not connected', () => {
       expect(() => connector.disconnect()).not.toThrow();
     });
+
+    it('should allow reconnect after disconnect', async () => {
+      await connector.connect();
+      connector.disconnect();
+      await connector.connect();
+
+      expect(connector.connected).toBe(true);
+      expect(() => connector.getSDK()).not.toThrow();
+    });
   });
 
   describe('getSDK', () => {

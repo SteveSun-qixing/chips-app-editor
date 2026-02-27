@@ -1,0 +1,88 @@
+.drag-ghost {
+    position: fixed;
+    pointer-events: none;
+    z-index: 10001;
+    transform: translate(-50%, -100%) translateY(-12px);
+}
+
+.drag-ghost__card {
+    display: flex;
+    align-items: center;
+    gap: var(--chips-spacing-sm, 8px);
+    padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 12px);
+    background-color: var(--chips-color-bg-base, #fff);
+    border-radius: var(--chips-border-radius-base, 8px);
+    box-shadow: var(--chips-shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+    border: 2px solid var(--chips-color-primary, #1890ff);
+    max-width: 200px;
+}
+
+.drag-ghost--cannot-drop .drag-ghost__card {
+    border-color: var(--chips-color-error, #ff4d4f);
+    opacity: 0.8;
+}
+
+.drag-ghost__icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.drag-ghost__content {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.drag-ghost__title {
+    font-size: var(--chips-font-size-sm, 14px);
+    font-weight: var(--chips-font-weight-medium, 500);
+    color: var(--chips-color-text-primary, #1a1a1a);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.drag-ghost__hint {
+    font-size: var(--chips-font-size-xs, 12px);
+    color: var(--chips-color-text-secondary, #666);
+}
+
+.drag-ghost__status {
+    position: absolute;
+    right: -8px;
+    top: -8px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--chips-shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+.drag-ghost__status-icon {
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.drag-ghost__status-icon--ok {
+    background-color: var(--chips-color-success, #52c41a);
+    color: white;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.drag-ghost__status-icon--no {
+    background-color: var(--chips-color-error, #ff4d4f);
+    color: white;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}

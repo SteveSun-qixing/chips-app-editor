@@ -7,7 +7,7 @@ import { generateId62 } from './id';
 
 // 导出性能优化工具
 export * from './performance';
-export * from './virtual-list';
+// export * from './virtual-list'; // TODO: 等待 virtual-list 迁移
 export * from './lazy-load';
 export * from './id';
 

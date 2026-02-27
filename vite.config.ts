@@ -1,14 +1,13 @@
 import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
+import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
 export default defineConfig({
   base: './',
-  plugins: [vue()],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      '@chips/components': resolve(__dirname, 'src/shims/chips-components'),
     },
   },
   server: {
@@ -27,9 +26,6 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
       },
     },
-  },
-  optimizeDeps: {
-    include: ['vue', 'vue-router', 'pinia'],
   },
   clearScreen: false,
 });

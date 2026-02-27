@@ -4,9 +4,20 @@
  * @description 负责与 Chips-SDK 的连接和通信
  */
 
-import type { ChipsSDK } from '@chips/sdk';
+import { BridgeClient, ChipsSDK } from '@chips/sdk';
 import type { EventEmitter } from './event-manager';
-import { getEditorSdk } from '@/services/sdk-service';
+
+async function initializeSdk(debug: boolean): Promise<ChipsSDK> {
+  const bridgeClient = new BridgeClient();
+  const SdkClass = ChipsSDK;
+  const sdk = new SdkClass({
+    connectorInstance: bridgeClient,
+    autoConnect: true,
+    debug,
+  });
+  await sdk.initialize();
+  return sdk;
+}
 
 /**
  * SDK 连接配置选项
@@ -32,6 +43,8 @@ export interface SDKConnectorOptions {
 export class SDKConnector {
   /** SDK 实例 */
   private sdk: ChipsSDK | null = null;
+  /** SDK 初始化中的 Promise */
+  private sdkPromise: Promise<ChipsSDK> | null = null;
   /** 事件发射器 */
   private events: EventEmitter;
   /** 连接状态 */
@@ -61,7 +74,7 @@ export class SDKConnector {
 
     try {
       this.log('Connecting to SDK...');
-      this.sdk = await getEditorSdk();
+      this.sdk = await this.getOrCreateSdk();
       this.isConnected = true;
       this.events.emit('connector:connected', {});
       this.log('SDK connected successfully');
@@ -79,6 +92,7 @@ export class SDKConnector {
       this.sdk.destroy();
       this.sdk = null;
     }
+    this.sdkPromise = null;
 
     if (this.isConnected) {
       this.isConnected = false;
@@ -101,6 +115,18 @@ export class SDKConnector {
    */
   get connected(): boolean {
     return this.isConnected;
+  }
+
+  private async getOrCreateSdk(): Promise<ChipsSDK> {
+    if (this.sdk) {
+      return this.sdk;
+    }
+
+    if (!this.sdkPromise) {
+      this.sdkPromise = initializeSdk(Boolean(this.options.debug));
+    }
+
+    return this.sdkPromise;
   }
 
   private log(...args: unknown[]): void {

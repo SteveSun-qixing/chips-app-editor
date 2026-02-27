@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "description": "editor page minimum functional set across all supported sizes",
+  "tasks": [
+    {
+      "id": "create-card",
+      "name": "create and open composite card",
+      "requiredAtBreakpoints": [
+        "compact",
+        "medium",
+        "wide"
+      ]
+    },
+    {
+      "id": "edit-card",
+      "name": "edit base card content and settings",
+      "requiredAtBreakpoints": [
+        "compact",
+        "medium",
+        "wide"
+      ]
+    },
+    {
+      "id": "save-card",
+      "name": "persist card data and cover assets",
+      "requiredAtBreakpoints": [
+        "compact",
+        "medium",
+        "wide"
+      ]
+    },
+    {
+      "id": "open-workspace-file",
+      "name": "open card or box from workspace tree",
+      "requiredAtBreakpoints": [
+        "compact",
+        "medium",
+        "wide"
+      ]
+    }
+  ],
+  "statePersistence": {
+    "preserveCardDraft": true,
+    "preserveActiveTab": true,
+    "preserveCanvasViewport": true
+  }
+}

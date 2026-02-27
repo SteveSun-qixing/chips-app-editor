@@ -4,12 +4,12 @@
  */
 
 // 组件
-export { default as FileDropZone } from './FileDropZone.vue';
-export { default as InsertIndicator } from './InsertIndicator.vue';
-export { default as DropHighlight } from './DropHighlight.vue';
-export { default as DragGhost } from './DragGhost.vue';
-export { default as SortableList } from './SortableList.vue';
-export { default as NestableCard } from './NestableCard.vue';
+export { FileDropZone } from './FileDropZone';
+export { InsertIndicator } from './InsertIndicator';
+export { DropHighlight } from './DropHighlight';
+export { DragGhost } from './DragGhost';
+export { SortableList } from './SortableList';
+export { NestableCard } from './NestableCard';
 
 // 类型
 export type {

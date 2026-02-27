@@ -4,22 +4,16 @@
  * @description 提供缩放、平移等画布操作功能
  */
 
-import { ref, watch, computed, type Ref } from 'vue';
-import { useUIStore } from '@/core/state';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useUIStore, getUIStore } from '@/core/state';
 
-/** 画布控制选项 */
 export interface CanvasControlsOptions {
-  /** 最小缩放值 */
   minZoom?: number;
-  /** 最大缩放值 */
   maxZoom?: number;
-  /** 缩放步长 */
   zoomStep?: number;
-  /** 是否以鼠标位置为中心缩放 */
   smoothZoom?: boolean;
 }
 
-/** 内容边界 */
 export interface ContentBounds {
   x: number;
   y: number;
@@ -27,63 +21,31 @@ export interface ContentBounds {
   height: number;
 }
 
-/** 坐标点 */
 export interface Point {
   x: number;
   y: number;
 }
 
-/** 画布控制 Hook 返回值 */
 export interface CanvasControlsReturn {
-  // 状态
-  zoom: Ref<number>;
-  panX: Ref<number>;
-  panY: Ref<number>;
-  isPanning: Ref<boolean>;
-  zoomPercent: Ref<number>;
-
-  // 事件处理
-  handleWheel: (e: WheelEvent) => void;
-  handleMouseDown: (e: MouseEvent) => void;
-  handleMouseMove: (e: MouseEvent) => void;
+  zoom: number;
+  panX: number;
+  panY: number;
+  isPanning: boolean;
+  zoomPercent: number;
+  handleWheel: (e: React.WheelEvent | WheelEvent) => void;
+  handleMouseDown: (e: React.MouseEvent | MouseEvent) => void;
+  handleMouseMove: (e: React.MouseEvent | MouseEvent) => void;
   handleMouseUp: () => void;
-
-  // 控制方法
   zoomIn: () => void;
   zoomOut: () => void;
   zoomTo: (value: number) => void;
   resetView: () => void;
   fitToContent: (contentBounds?: ContentBounds) => void;
   panTo: (x: number, y: number) => void;
-
-  // 工具方法
   screenToWorld: (screenX: number, screenY: number) => Point;
   worldToScreen: (worldX: number, worldY: number) => Point;
 }
 
-/**
- * 画布控制 Hook
- * 提供缩放、平移等画布操作
- *
- * @param options - 画布控制选项
- * @returns 画布控制方法和状态
- *
- * @example
- * ```typescript
- * const {
- *   zoom,
- *   panX,
- *   panY,
- *   handleWheel,
- *   handleMouseDown,
- *   handleMouseMove,
- *   handleMouseUp,
- *   zoomIn,
- *   zoomOut,
- *   resetView,
- * } = useCanvasControls();
- * ```
- */
 export function useCanvasControls(options: CanvasControlsOptions = {}): CanvasControlsReturn {
   const {
     minZoom = 0.1,
@@ -92,139 +54,135 @@ export function useCanvasControls(options: CanvasControlsOptions = {}): CanvasCo
     smoothZoom = true,
   } = options;
 
-  const uiStore = useUIStore();
+  // React State from UIStore
+  const zoom = useUIStore((s) => s.canvas.zoom);
+  const panX = useUIStore((s) => s.canvas.panX);
+  const panY = useUIStore((s) => s.canvas.panY);
 
-  // 状态
-  const zoom = ref(uiStore.canvas.zoom);
-  const panX = ref(uiStore.canvas.panX);
-  const panY = ref(uiStore.canvas.panY);
-  const isPanning = ref(false);
-  const panStart = ref<Point>({ x: 0, y: 0 });
-  const panOrigin = ref<Point>({ x: 0, y: 0 });
+  const uiStore = getUIStore();
 
-  // 同步到 store
-  watch([zoom, panX, panY], () => {
-    uiStore.updateCanvas({
-      zoom: zoom.value,
-      panX: panX.value,
-      panY: panY.value,
-    });
+  const [isPanning, setIsPanning] = useState(false);
+
+  // Use refs for panning state to avoid stale closures in handleMouseMove
+  const panStateRef = useRef({
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
+    isPanning: false,
   });
 
-  // 缩放百分比
-  const zoomPercent = computed(() => Math.round(zoom.value * 100));
+  const zoomPercent = useMemo(() => Math.round(zoom * 100), [zoom]);
 
-  /**
-   * 处理鼠标滚轮事件（在桌面空白区域）
-   * 
-   * 滚动行为设计：
-   * - 在桌面空白区域滚轮 = 以鼠标位置为中心缩放桌面
-   * - Ctrl/Command + 滚轮 = 强制缩放（在任何位置）
-   * 
-   * @param e - 鼠标滚轮事件
-   */
-  function handleWheel(e: WheelEvent): void {
+  const updateCanvas = useCallback((updates: Partial<{ zoom: number; panX: number; panY: number }>) => {
+    uiStore.updateCanvas(updates);
+  }, [uiStore]);
+
+  const handleWheel = useCallback((e: React.WheelEvent | WheelEvent) => {
     e.preventDefault();
-    
+
     // 滚轮 = 缩放桌面
+    const currentZoom = uiStore.getState().canvas.zoom;
+    const currentPanX = uiStore.getState().canvas.panX;
+    const currentPanY = uiStore.getState().canvas.panY;
+
     const delta = e.deltaY > 0 ? -zoomStep : zoomStep;
-    const newZoom = Math.max(minZoom, Math.min(maxZoom, zoom.value + delta));
+    const newZoom = Math.max(minZoom, Math.min(maxZoom, currentZoom + delta));
 
     if (smoothZoom && e.currentTarget instanceof HTMLElement) {
-      // 以鼠标位置为中心缩放
-      const rect = e.currentTarget.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      // 防止缩放中心偏移
+      let rectLeft = 0;
+      let rectTop = 0;
 
-      // 计算缩放前后的世界坐标差异
-      const worldX = (mouseX - panX.value) / zoom.value;
-      const worldY = (mouseY - panY.value) / zoom.value;
+      // React 合成事件或原生事件都可以有 currentTarget，但在某些情况下原生的绑定更稳妥。
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      rectLeft = rect.left;
+      rectTop = rect.top;
 
-      zoom.value = newZoom;
+      const clientX = 'clientX' in e ? e.clientX : 0;
+      const clientY = 'clientY' in e ? e.clientY : 0;
 
-      // 调整平移以保持鼠标位置不变
-      panX.value = mouseX - worldX * newZoom;
-      panY.value = mouseY - worldY * newZoom;
+      const mouseX = clientX - rectLeft;
+      const mouseY = clientY - rectTop;
+
+      const worldX = (mouseX - currentPanX) / currentZoom;
+      const worldY = (mouseY - currentPanY) / currentZoom;
+
+      const newPanX = mouseX - worldX * newZoom;
+      const newPanY = mouseY - worldY * newZoom;
+
+      updateCanvas({ zoom: newZoom, panX: newPanX, panY: newPanY });
     } else {
-      zoom.value = newZoom;
+      updateCanvas({ zoom: newZoom });
     }
-  }
+  }, [minZoom, maxZoom, smoothZoom, updateCanvas, zoomStep, uiStore]);
 
-  /**
-   * 处理鼠标按下（开始平移）
-   * @param e - 鼠标事件
-   */
-  function handleMouseDown(e: MouseEvent): void {
+  const handleMouseDown = useCallback((e: React.MouseEvent | MouseEvent) => {
     // 鼠标中键或在画布空白处按下左键时开始平移
     if (e.button === 1 || (e.button === 0 && e.target === e.currentTarget)) {
-      isPanning.value = true;
-      panStart.value = { x: e.clientX, y: e.clientY };
-      panOrigin.value = { x: panX.value, y: panY.value };
+      panStateRef.current = {
+        startX: 'clientX' in e ? e.clientX : 0,
+        startY: 'clientY' in e ? e.clientY : 0,
+        originX: uiStore.getState().canvas.panX,
+        originY: uiStore.getState().canvas.panY,
+        isPanning: true,
+      };
+      setIsPanning(true);
       e.preventDefault();
     }
-  }
+  }, [uiStore]);
 
-  /**
-   * 处理鼠标移动（平移中）
-   * @param e - 鼠标事件
-   */
-  function handleMouseMove(e: MouseEvent): void {
-    if (!isPanning.value) return;
+  const handleMouseMove = useCallback((e: React.MouseEvent | MouseEvent) => {
+    if (!panStateRef.current.isPanning) return;
 
-    const deltaX = e.clientX - panStart.value.x;
-    const deltaY = e.clientY - panStart.value.y;
+    const clientX = 'clientX' in e ? e.clientX : 0;
+    const clientY = 'clientY' in e ? e.clientY : 0;
 
-    panX.value = panOrigin.value.x + deltaX;
-    panY.value = panOrigin.value.y + deltaY;
-  }
+    const deltaX = clientX - panStateRef.current.startX;
+    const deltaY = clientY - panStateRef.current.startY;
 
-  /**
-   * 处理鼠标抬起（结束平移）
-   */
-  function handleMouseUp(): void {
-    isPanning.value = false;
-  }
+    const newPanX = panStateRef.current.originX + deltaX;
+    const newPanY = panStateRef.current.originY + deltaY;
 
-  /**
-   * 放大
-   */
-  function zoomIn(): void {
-    zoom.value = Math.min(maxZoom, zoom.value + zoomStep);
-  }
+    updateCanvas({ panX: newPanX, panY: newPanY });
+  }, [updateCanvas]);
 
-  /**
-   * 缩小
-   */
-  function zoomOut(): void {
-    zoom.value = Math.max(minZoom, zoom.value - zoomStep);
-  }
+  const handleMouseUp = useCallback(() => {
+    panStateRef.current.isPanning = false;
+    setIsPanning(false);
+  }, []);
 
-  /**
-   * 缩放到指定值
-   * @param value - 目标缩放值
-   */
-  function zoomTo(value: number): void {
-    zoom.value = Math.max(minZoom, Math.min(maxZoom, value));
-  }
+  const zoomIn = useCallback(() => {
+    const currentZoom = uiStore.getState().canvas.zoom;
+    updateCanvas({ zoom: Math.min(maxZoom, currentZoom + zoomStep) });
+  }, [maxZoom, updateCanvas, zoomStep, uiStore]);
 
-  /**
-   * 获取所有卡片窗口的边界
-   * @returns 所有卡片组成的边界，如果没有卡片返回 null
-   */
-  function getAllCardsBounds(): ContentBounds | null {
-    const cardWindows = uiStore.cardWindows;
-    if (cardWindows.length === 0) return null;
+  const zoomOut = useCallback(() => {
+    const currentZoom = uiStore.getState().canvas.zoom;
+    updateCanvas({ zoom: Math.max(minZoom, currentZoom - zoomStep) });
+  }, [minZoom, updateCanvas, zoomStep, uiStore]);
+
+  const zoomTo = useCallback((value: number) => {
+    updateCanvas({ zoom: Math.max(minZoom, Math.min(maxZoom, value)) });
+  }, [maxZoom, minZoom, updateCanvas]);
+
+  const getAllCardsBounds = useCallback((): ContentBounds | null => {
+
+    const state = uiStore.getState();
+    const actualCardWindows = state.windowList.filter(w => w.type === 'card');
+
+    if (actualCardWindows.length === 0) return null;
 
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    cardWindows.forEach((card) => {
+    actualCardWindows.forEach((card) => {
       const x = card.position.x;
       const y = card.position.y;
       const width = card.size.width;
-      const height = card.size.height || 500; // 默认高度
+      const height = card.size.height || 500;
 
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
@@ -238,135 +196,88 @@ export function useCanvasControls(options: CanvasControlsOptions = {}): CanvasCo
       width: maxX - minX,
       height: maxY - minY,
     };
-  }
+  }, [uiStore]);
 
-  /**
-   * 重置视图
-   * 将缩放比例重置为 100%，视觉中心移动到所有卡片中心
-   */
-  function resetView(): void {
-    zoom.value = 1;
-
-    // 获取所有卡片的边界
+  const resetView = useCallback(() => {
     const bounds = getAllCardsBounds();
+    let newPanX = 0;
+    let newPanY = 0;
+
     if (bounds) {
-      // 计算卡片中心
       const centerX = bounds.x + bounds.width / 2;
       const centerY = bounds.y + bounds.height / 2;
-
-      // 计算视口中心
-      const viewportWidth = globalThis.innerWidth;
-      const viewportHeight = globalThis.innerHeight;
-
-      // 将卡片中心移动到视口中心
-      panX.value = viewportWidth / 2 - centerX * zoom.value;
-      panY.value = viewportHeight / 2 - centerY * zoom.value;
-    } else {
-      panX.value = 0;
-      panY.value = 0;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      newPanX = viewportWidth / 2 - centerX * 1;
+      newPanY = viewportHeight / 2 - centerY * 1;
     }
-  }
 
-  /**
-   * 适应内容
-   * 缩放到能看到所有卡片的比例，最小不低于 25%
-   * @param contentBounds - 内容边界（可选，不传则自动计算）
-   */
-  function fitToContent(contentBounds?: ContentBounds): void {
-    // 如果没有传入边界，自动计算所有卡片的边界
+    updateCanvas({ zoom: 1, panX: newPanX, panY: newPanY });
+  }, [getAllCardsBounds, updateCanvas]);
+
+  const fitToContent = useCallback((contentBounds?: ContentBounds) => {
     const bounds = contentBounds || getAllCardsBounds();
-    
+
     if (!bounds) {
-      // 没有卡片，重置到默认位置
-      zoom.value = 1;
-      panX.value = 0;
-      panY.value = 0;
+      updateCanvas({ zoom: 1, panX: 0, panY: 0 });
       return;
     }
 
-    // 计算适应视口的缩放比例
-    const viewportWidth = globalThis.innerWidth;
-    const viewportHeight = globalThis.innerHeight;
-    const padding = 80; // 边距
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const padding = 80;
 
     const scaleX = (viewportWidth - padding * 2) / bounds.width;
     const scaleY = (viewportHeight - padding * 2) / bounds.height;
     let newZoom = Math.min(scaleX, scaleY);
 
-    // 限制缩放范围：最小 25%，最大不超过 100%（或 maxZoom）
     const maxFitZoom = Math.min(1, maxZoom);
     newZoom = Math.max(0.25, Math.min(maxFitZoom, newZoom));
 
-    zoom.value = newZoom;
-
-    // 计算卡片中心
     const centerX = bounds.x + bounds.width / 2;
     const centerY = bounds.y + bounds.height / 2;
+    const newPanX = viewportWidth / 2 - centerX * newZoom;
+    const newPanY = viewportHeight / 2 - centerY * newZoom;
 
-    // 将卡片中心移动到视口中心
-    panX.value = viewportWidth / 2 - centerX * zoom.value;
-    panY.value = viewportHeight / 2 - centerY * zoom.value;
-  }
+    updateCanvas({ zoom: newZoom, panX: newPanX, panY: newPanY });
+  }, [getAllCardsBounds, updateCanvas, maxZoom]);
 
-  /**
-   * 平移到指定位置
-   * @param x - X 坐标
-   * @param y - Y 坐标
-   */
-  function panTo(x: number, y: number): void {
-    panX.value = x;
-    panY.value = y;
-  }
+  const panTo = useCallback((x: number, y: number) => {
+    updateCanvas({ panX: x, panY: y });
+  }, [updateCanvas]);
 
-  /**
-   * 将屏幕坐标转换为世界坐标
-   * @param screenX - 屏幕 X 坐标
-   * @param screenY - 屏幕 Y 坐标
-   * @returns 世界坐标
-   */
-  function screenToWorld(screenX: number, screenY: number): Point {
+  const screenToWorld = useCallback((screenX: number, screenY: number): Point => {
+    const state = uiStore.getState();
     return {
-      x: (screenX - panX.value) / zoom.value,
-      y: (screenY - panY.value) / zoom.value,
+      x: (screenX - state.canvas.panX) / state.canvas.zoom,
+      y: (screenY - state.canvas.panY) / state.canvas.zoom,
     };
-  }
+  }, [uiStore]);
 
-  /**
-   * 将世界坐标转换为屏幕坐标
-   * @param worldX - 世界 X 坐标
-   * @param worldY - 世界 Y 坐标
-   * @returns 屏幕坐标
-   */
-  function worldToScreen(worldX: number, worldY: number): Point {
+  const worldToScreen = useCallback((worldX: number, worldY: number): Point => {
+    const state = uiStore.getState();
     return {
-      x: worldX * zoom.value + panX.value,
-      y: worldY * zoom.value + panY.value,
+      x: worldX * state.canvas.zoom + state.canvas.panX,
+      y: worldY * state.canvas.zoom + state.canvas.panY,
     };
-  }
+  }, [uiStore]);
 
   return {
-    // 状态
     zoom,
     panX,
     panY,
     isPanning,
     zoomPercent,
-
-    // 事件处理
     handleWheel,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp,
-
-    // 控制方法
     zoomIn,
     zoomOut,
     zoomTo,
     resetView,
     fitToContent,
     panTo,
-
-    // 工具方法
     screenToWorld,
     worldToScreen,
   };

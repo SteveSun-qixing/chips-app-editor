@@ -4,12 +4,12 @@
  */
 
 // 主组件
-export { default as CardBoxLibrary } from './CardBoxLibrary.vue';
+export { CardBoxLibrary } from './CardBoxLibrary';
 
 // 子组件
-export { default as CardTypeGrid } from './CardTypeGrid.vue';
-export { default as LayoutTypeGrid } from './LayoutTypeGrid.vue';
-export { default as DragPreview } from './DragPreview.vue';
+export { CardTypeGrid } from './CardTypeGrid';
+export { LayoutTypeGrid } from './LayoutTypeGrid';
+export { DragPreview } from './DragPreview';
 
 // 类型
 export type {

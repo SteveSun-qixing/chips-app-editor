@@ -1,0 +1,154 @@
+/* ============================================================
+ * ThemePanel 样式
+ * 从 ThemePanel.vue 迁移
+ * ============================================================ */
+
+.theme-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chips-spacing-lg, 20px);
+}
+
+.theme-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.theme-panel__label {
+  font-size: var(--chips-font-size-sm, 14px);
+  font-weight: var(--chips-font-weight-medium, 500);
+  color: var(--chips-color-text, #111827);
+}
+
+.theme-panel__upload-btn {
+  padding: var(--chips-spacing-sm, 8px) var(--chips-spacing-md, 16px);
+  border: 1px dashed var(--chips-color-border, #e5e7eb);
+  border-radius: var(--chips-radius-md, 8px);
+  background: var(--chips-color-surface, #ffffff);
+  font-size: var(--chips-font-size-sm, 14px);
+  color: var(--chips-color-text, #111827);
+  cursor: pointer;
+  transition: border-color var(--chips-transition-fast, 150ms ease),
+    background-color var(--chips-transition-fast, 150ms ease);
+}
+
+.theme-panel__upload-btn:hover {
+  border-color: var(--chips-color-primary, #3b82f6);
+  background: color-mix(in srgb, var(--chips-color-primary) 5%, transparent);
+}
+
+/* 加载状态 */
+.theme-panel__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--chips-spacing-sm, 8px);
+  padding: var(--chips-spacing-xl, 32px);
+}
+
+.theme-panel__loading-text {
+  font-size: var(--chips-font-size-sm, 14px);
+  color: var(--chips-color-text-secondary, #6b7280);
+}
+
+/* 主题网格 */
+.theme-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--chips-spacing-md, 16px);
+}
+
+.theme-panel__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--chips-spacing-sm, 8px);
+  padding: var(--chips-spacing-md, 16px);
+  border: 2px solid var(--chips-color-border, #e5e7eb);
+  border-radius: var(--chips-radius-md, 8px);
+  background: var(--chips-color-surface, #ffffff);
+  cursor: pointer;
+  transition: border-color var(--chips-transition-fast, 150ms ease),
+    box-shadow var(--chips-transition-fast, 150ms ease);
+}
+
+.theme-panel__item:hover {
+  border-color: var(--chips-color-primary, #3b82f6);
+}
+
+.theme-panel__item--selected {
+  border-color: var(--chips-color-primary, #3b82f6);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--chips-color-primary) 20%, transparent);
+}
+
+.theme-panel__item-preview {
+  width: 80px;
+  height: 60px;
+  border-radius: var(--chips-radius-sm, 4px);
+  background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+}
+
+.theme-panel__item-name {
+  font-size: var(--chips-font-size-xs, 12px);
+  color: var(--chips-color-text, #111827);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-panel__item-check {
+  position: absolute;
+  top: var(--chips-spacing-xs, 4px);
+  right: var(--chips-spacing-xs, 4px);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--chips-color-primary, #3b82f6);
+  color: white;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 提示信息 */
+.theme-panel__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--chips-spacing-sm, 8px);
+  padding: var(--chips-spacing-sm, 12px);
+  background: color-mix(in srgb, var(--chips-color-warning) 10%, transparent);
+  border-radius: var(--chips-radius-md, 8px);
+}
+
+.theme-panel__hint-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.theme-panel__hint .chips-alert__message {
+  font-size: var(--chips-font-size-xs, 12px);
+  color: var(--chips-color-text-secondary, #6b7280);
+}
+
+/* Loading spinner */
+.chips-loading-spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--chips-color-border, #e5e7eb);
+  border-top-color: var(--chips-color-primary, #3b82f6);
+  border-radius: 50%;
+  animation: chips-spin 0.8s linear infinite;
+}
+
+@keyframes chips-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

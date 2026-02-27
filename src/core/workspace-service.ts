@@ -4,7 +4,7 @@
  * @description 管理编辑器的内置工作区目录，所有文件都保存在这里
  */
 
-import { ref, computed, type Ref, type ComputedRef } from 'vue';
+
 import yaml from 'yaml';
 import type { EventEmitter } from './event-manager';
 import { createEventEmitter } from './event-manager';
@@ -47,11 +47,11 @@ export interface WorkspaceState {
 /** 工作区服务接口 */
 export interface WorkspaceService {
   /** 工作区状态 */
-  state: Readonly<Ref<WorkspaceState>>;
+  state: Readonly<WorkspaceState>;
   /** 文件列表 */
-  files: ComputedRef<WorkspaceFile[]>;
+  files: WorkspaceFile[];
   /** 是否已初始化 */
-  isInitialized: ComputedRef<boolean>;
+  isInitialized: boolean;
   /** 初始化工作区 */
   initialize: () => Promise<void>;
   /** 创建卡片 */
@@ -180,18 +180,22 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
   let workspaceRootPath = '';
 
   /** 工作区状态 */
-  const state = ref<WorkspaceState>({
+  let state: WorkspaceState = {
     initialized: false,
     rootPath: '',
     files: [],
     openedFiles: [],
-  });
+  };
 
-  /** 文件列表计算属性 */
-  const files = computed(() => state.value.files);
+  /** 文件列表 getter */
+  function getFiles(): WorkspaceFile[] {
+    return state.files;
+  }
 
-  /** 是否已初始化 */
-  const isInitialized = computed(() => state.value.initialized);
+  /** 是否已初始化 getter */
+  function getIsInitialized(): boolean {
+    return state.initialized;
+  }
 
   function resolveParentPath(parentPath?: string): string {
     if (!workspaceRootPath) {
@@ -326,12 +330,12 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    */
   async function initialize(): Promise<void> {
     const nextRootPath = trimTrailingSlash(normalizePath(resourceService.workspaceRoot));
-    const hasRootChanged = state.value.rootPath !== nextRootPath;
-    if (state.value.initialized && !hasRootChanged) return;
+    const hasRootChanged = state.rootPath !== nextRootPath;
+    if (state.initialized && !hasRootChanged) return;
 
     try {
       workspaceRootPath = '';
-      state.value.rootPath = nextRootPath;
+      state.rootPath = nextRootPath;
 
       if (nextRootPath) {
         if (!isAbsolutePath(nextRootPath)) {
@@ -347,13 +351,13 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
         }
         await refresh();
       } else {
-        state.value.files = [];
+        state.files = [];
       }
 
-      state.value.initialized = true;
+      state.initialized = true;
 
-      eventEmitter.emit('workspace:initialized', { rootPath: state.value.rootPath });
-      console.warn('[WorkspaceService] 工作区已初始化:', state.value.rootPath);
+      eventEmitter.emit('workspace:initialized', { rootPath: state.rootPath });
+      console.warn('[WorkspaceService] 工作区已初始化:', state.rootPath);
     } catch (error) {
       console.error('[WorkspaceService] 初始化失败:', error);
       throw error;
@@ -383,7 +387,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
 
     await refresh();
     const targetPath = resolveWorkspacePath(result.cardPath, workspaceRootPath);
-    const file = findFileByPath(state.value.files, targetPath);
+    const file = findFileByPath(state.files, targetPath);
     if (file) {
       eventEmitter.emit('workspace:file-created', { file, content: initialContent });
       return file;
@@ -397,7 +401,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
       createdAt: now(),
       modifiedAt: now(),
     };
-    state.value.files.push(fallbackFile);
+    state.files.push(fallbackFile);
     eventEmitter.emit('workspace:file-created', { file: fallbackFile, content: initialContent });
     return fallbackFile;
   }
@@ -438,7 +442,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
     await resourceService.writeText(joinPath(metaDir, 'content.yaml'), yaml.stringify(content));
 
     await refresh();
-    const file = findFileByPath(state.value.files, boxPath);
+    const file = findFileByPath(state.files, boxPath);
     if (file) {
       eventEmitter.emit('workspace:file-created', { file, layoutType });
       return file;
@@ -452,7 +456,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
       createdAt: timestamp,
       modifiedAt: timestamp,
     };
-    state.value.files.push(fallbackFile);
+    state.files.push(fallbackFile);
     eventEmitter.emit('workspace:file-created', { file: fallbackFile, layoutType });
     return fallbackFile;
   }
@@ -470,7 +474,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
 
     await resourceService.ensureDir(folderPath);
     await refresh();
-    const file = findFileByPath(state.value.files, folderPath);
+    const file = findFileByPath(state.files, folderPath);
     if (file) {
       eventEmitter.emit('workspace:file-created', { file });
       return file;
@@ -485,7 +489,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
       modifiedAt: timestamp,
       children: [],
     };
-    state.value.files.push(fallbackFile);
+    state.files.push(fallbackFile);
     eventEmitter.emit('workspace:file-created', { file: fallbackFile });
     return fallbackFile;
   }
@@ -494,14 +498,14 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 获取文件
    */
   function getFile(id: string): WorkspaceFile | undefined {
-    return findFileById(state.value.files, id);
+    return findFileById(state.files, id);
   }
 
   /**
    * 删除文件
    */
   async function deleteFile(id: string): Promise<void> {
-    const file = findFileById(state.value.files, id);
+    const file = findFileById(state.files, id);
     if (!file) return;
 
     await resourceService.delete(file.path);
@@ -513,7 +517,7 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 重命名文件
    */
   async function renameFile(id: string, newName: string): Promise<void> {
-    const file = findFileById(state.value.files, id);
+    const file = findFileById(state.files, id);
     if (!file) return;
 
     const trimmed = newName.trim();
@@ -544,21 +548,21 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    */
   async function refresh(): Promise<void> {
     if (!workspaceRootPath) {
-      state.value.files = [];
-      eventEmitter.emit('workspace:refreshed', { files: state.value.files });
+      state.files = [];
+      eventEmitter.emit('workspace:refreshed', { files: state.files });
       return;
     }
 
-    state.value.files = await buildTree(workspaceRootPath);
-    eventEmitter.emit('workspace:refreshed', { files: state.value.files });
+    state.files = await buildTree(workspaceRootPath);
+    eventEmitter.emit('workspace:refreshed', { files: state.files });
   }
 
   /**
    * 获取已打开的文件
    */
   function getOpenedFiles(): WorkspaceFile[] {
-    return state.value.openedFiles
-      .map((id) => findFileById(state.value.files, id))
+    return state.openedFiles
+      .map((id) => findFileById(state.files, id))
       .filter(Boolean) as WorkspaceFile[];
   }
 
@@ -566,9 +570,9 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 打开文件
    */
   function openFile(id: string): void {
-    if (!state.value.openedFiles.includes(id)) {
-      state.value.openedFiles.push(id);
-      const file = findFileById(state.value.files, id);
+    if (!state.openedFiles.includes(id)) {
+      state.openedFiles.push(id);
+      const file = findFileById(state.files, id);
       eventEmitter.emit('workspace:file-opened', { file });
     }
   }
@@ -577,10 +581,10 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
    * 关闭文件
    */
   function closeFile(id: string): void {
-    const index = state.value.openedFiles.indexOf(id);
+    const index = state.openedFiles.indexOf(id);
     if (index !== -1) {
-      state.value.openedFiles.splice(index, 1);
-      const file = findFileById(state.value.files, id);
+      state.openedFiles.splice(index, 1);
+      const file = findFileById(state.files, id);
       eventEmitter.emit('workspace:file-closed', { file });
     }
   }
@@ -596,10 +600,10 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
       return;
     }
 
-    let file = findFileByPath(state.value.files, targetPath);
+    let file = findFileByPath(state.files, targetPath);
     if (!file) {
       await refresh();
-      file = findFileByPath(state.value.files, targetPath);
+      file = findFileByPath(state.files, targetPath);
     }
     if (file) {
       openFile(file.id);
@@ -609,9 +613,9 @@ export function createWorkspaceService(events?: EventEmitter): WorkspaceService 
   }
 
   return {
-    state: state as Readonly<Ref<WorkspaceState>>,
-    files,
-    isInitialized,
+    get state() { return state as Readonly<WorkspaceState>; },
+    get files() { return getFiles(); },
+    get isInitialized() { return getIsInitialized(); },
     initialize,
     createCard,
     createBox,

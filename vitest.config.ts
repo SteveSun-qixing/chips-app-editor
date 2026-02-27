@@ -1,29 +1,30 @@
 import { defineConfig } from 'vitest/config';
-import vue from '@vitejs/plugin-vue';
+import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      '@chips/components': resolve(__dirname, 'src/shims/chips-components'),
     },
   },
   test: {
     globals: true,
-    environment: 'happy-dom',
-    include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts}'],
+    environment: 'jsdom',
+    include: ['src/**/*.{test,spec}.{js,ts}', 'tests/**/*.{test,spec}.{js,ts,tsx}'],
+    exclude: ['**/archive/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/**/*.{ts,vue}'],
+      include: ['src/**/*.{ts,tsx}'],
       exclude: [
         'src/**/*.d.ts',
         'src/**/*.test.ts',
         'src/**/*.spec.ts',
         'src/**/index.ts',
         'src/types/**',
+        'src/archive/**',
       ],
       thresholds: {
         statements: 80,

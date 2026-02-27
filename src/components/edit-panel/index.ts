@@ -3,9 +3,9 @@
  * @module components/edit-panel
  */
 
-export { default as EditPanel } from './EditPanel.vue';
-export { default as PluginHost } from './PluginHost.vue';
-export { default as DefaultEditor } from './DefaultEditor.vue';
+export { EditPanel } from './EditPanel';
+export { PluginHost } from './PluginHost';
+export { DefaultEditor } from './DefaultEditor';
 
 // 类型导出
 export type {

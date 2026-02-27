@@ -1,115 +1,63 @@
 /**
  * 工作台布局控制 Hook
  * @module layouts/workbench/use-workbench
- * @description 提供工作台布局的响应式控制和状态管理
+ * @description 提供工作台布局的响应式控制和状态管理 (React版本)
  */
 
-import { ref, computed, reactive, watch, type ComputedRef, type Ref } from 'vue';
-import { useUIStore } from '@/core/state';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { getUIStore } from '@/core/state';
 
-/**
- * 工作台布局配置选项
- */
 export interface WorkbenchOptions {
-  /** 左侧面板默认宽度 */
   leftPanelWidth?: number;
-  /** 右侧面板默认宽度 */
   rightPanelWidth?: number;
-  /** 左侧面板最小宽度 */
   leftPanelMinWidth?: number;
-  /** 左侧面板最大宽度 */
   leftPanelMaxWidth?: number;
-  /** 右侧面板最小宽度 */
   rightPanelMinWidth?: number;
-  /** 右侧面板最大宽度 */
   rightPanelMaxWidth?: number;
-  /** 是否默认展开左侧面板 */
   leftPanelExpanded?: boolean;
-  /** 是否默认展开右侧面板 */
   rightPanelExpanded?: boolean;
-  /** 是否持久化布局配置 */
   persistLayout?: boolean;
-  /** 本地存储键名 */
   storageKey?: string;
 }
 
-/**
- * 工作台布局状态
- */
 export interface WorkbenchState {
-  /** 左侧面板宽度 */
   leftPanelWidth: number;
-  /** 右侧面板宽度 */
   rightPanelWidth: number;
-  /** 左侧面板是否展开 */
   leftPanelExpanded: boolean;
-  /** 右侧面板是否展开 */
   rightPanelExpanded: boolean;
-  /** 是否显示左侧面板 */
   showLeftPanel: boolean;
-  /** 是否显示右侧面板 */
   showRightPanel: boolean;
-  /** 是否正在调整布局 */
   isResizing: boolean;
 }
 
-/**
- * Hook 返回类型
- */
 export interface WorkbenchControlsReturn {
-  /** 布局状态 */
   state: WorkbenchState;
-  /** 左侧面板宽度 */
-  leftPanelWidth: Ref<number>;
-  /** 右侧面板宽度 */
-  rightPanelWidth: Ref<number>;
-  /** 左侧面板是否展开 */
-  leftPanelExpanded: Ref<boolean>;
-  /** 右侧面板是否展开 */
-  rightPanelExpanded: Ref<boolean>;
-  /** 是否显示左侧面板 */
-  showLeftPanel: Ref<boolean>;
-  /** 是否显示右侧面板 */
-  showRightPanel: Ref<boolean>;
-  /** 是否正在调整布局 */
-  isResizing: Ref<boolean>;
-  /** 主区域可用宽度 */
-  mainAreaWidth: ComputedRef<number>;
-  /** 切换左侧面板 */
+  leftPanelWidth: number;
+  rightPanelWidth: number;
+  leftPanelExpanded: boolean;
+  rightPanelExpanded: boolean;
+  showLeftPanel: boolean;
+  showRightPanel: boolean;
+  isResizing: boolean;
+  mainAreaWidth: number;
   toggleLeftPanel: () => void;
-  /** 切换右侧面板 */
   toggleRightPanel: () => void;
-  /** 设置左侧面板宽度 */
   setLeftPanelWidth: (width: number) => void;
-  /** 设置右侧面板宽度 */
   setRightPanelWidth: (width: number) => void;
-  /** 展开左侧面板 */
   expandLeftPanel: () => void;
-  /** 收起左侧面板 */
   collapseLeftPanel: () => void;
-  /** 展开右侧面板 */
   expandRightPanel: () => void;
-  /** 收起右侧面板 */
   collapseRightPanel: () => void;
-  /** 显示左侧面板 */
   showLeft: () => void;
-  /** 隐藏左侧面板 */
   hideLeft: () => void;
-  /** 显示右侧面板 */
   showRight: () => void;
-  /** 隐藏右侧面板 */
   hideRight: () => void;
-  /** 重置布局 */
   resetLayout: () => void;
-  /** 保存布局配置 */
   saveLayout: () => void;
-  /** 加载布局配置 */
   loadLayout: () => void;
-  /** 设置调整状态 */
   setResizing: (resizing: boolean) => void;
 }
 
-/** 默认配置 */
 const DEFAULT_OPTIONS: Required<WorkbenchOptions> = {
   leftPanelWidth: 280,
   rightPanelWidth: 320,
@@ -123,251 +71,136 @@ const DEFAULT_OPTIONS: Required<WorkbenchOptions> = {
   storageKey: 'chips-workbench-layout',
 };
 
-/**
- * 工作台布局控制 Hook
- * @param options - 配置选项
- * @returns 工作台布局控制方法和状态
- * 
- * @example
- * ```typescript
- * const {
- *   leftPanelWidth,
- *   rightPanelWidth,
- *   toggleLeftPanel,
- *   toggleRightPanel,
- *   resetLayout,
- * } = useWorkbenchControls({
- *   leftPanelWidth: 280,
- *   rightPanelWidth: 320,
- *   persistLayout: true,
- * });
- * ```
- */
 export function useWorkbenchControls(
   options: WorkbenchOptions = {}
 ): WorkbenchControlsReturn {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const uiStore = useUIStore();
+  const uiStore = getUIStore();
 
-  // 响应式状态
-  const leftPanelWidth = ref(opts.leftPanelWidth);
-  const rightPanelWidth = ref(opts.rightPanelWidth);
-  const leftPanelExpanded = ref(opts.leftPanelExpanded);
-  const rightPanelExpanded = ref(opts.rightPanelExpanded);
-  const showLeftPanel = ref(true);
-  const showRightPanel = ref(true);
-  const isResizing = ref(false);
+  const [leftPanelWidth, setLeftPanelWidthState] = useState(opts.leftPanelWidth);
+  const [rightPanelWidth, setRightPanelWidthState] = useState(opts.rightPanelWidth);
+  const [leftPanelExpanded, setLeftPanelExpanded] = useState(opts.leftPanelExpanded);
+  const [rightPanelExpanded, setRightPanelExpanded] = useState(opts.rightPanelExpanded);
+  const [showLeftPanel, setShowLeftPanel] = useState(true);
+  const [showRightPanel, setShowRightPanel] = useState(true);
+  const [isResizing, setIsResizing] = useState(false);
 
-  // 计算属性：主区域可用宽度
-  const mainAreaWidth = computed(() => {
-    // 假设总宽度为 window.innerWidth，实际使用时应该从容器获取
-    const totalWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
-    const leftWidth = showLeftPanel.value
-      ? (leftPanelExpanded.value ? leftPanelWidth.value : 40)
-      : 0;
-    const rightWidth = showRightPanel.value
-      ? (rightPanelExpanded.value ? rightPanelWidth.value : 40)
-      : 0;
+  // Since mainAreaWidth depends on window size, we might need to listen to resize if we want it fully reactive,
+  // but let's keep it simple as in Vue version (which only reactive to its own states unless computed triggers it).
+  const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const mainAreaWidth = useMemo(() => {
+    const totalWidth = windowWidth;
+    const leftWidth = showLeftPanel ? (leftPanelExpanded ? leftPanelWidth : 40) : 0;
+    const rightWidth = showRightPanel ? (rightPanelExpanded ? rightPanelWidth : 40) : 0;
     return Math.max(300, totalWidth - leftWidth - rightWidth);
-  });
+  }, [windowWidth, showLeftPanel, leftPanelExpanded, leftPanelWidth, showRightPanel, rightPanelExpanded, rightPanelWidth]);
 
-  // 聚合状态对象
-  const state = reactive<WorkbenchState>({
-    get leftPanelWidth() { return leftPanelWidth.value; },
-    get rightPanelWidth() { return rightPanelWidth.value; },
-    get leftPanelExpanded() { return leftPanelExpanded.value; },
-    get rightPanelExpanded() { return rightPanelExpanded.value; },
-    get showLeftPanel() { return showLeftPanel.value; },
-    get showRightPanel() { return showRightPanel.value; },
-    get isResizing() { return isResizing.value; },
-  });
+  const state = useMemo<WorkbenchState>(() => ({
+    leftPanelWidth,
+    rightPanelWidth,
+    leftPanelExpanded,
+    rightPanelExpanded,
+    showLeftPanel,
+    showRightPanel,
+    isResizing,
+  }), [leftPanelWidth, rightPanelWidth, leftPanelExpanded, rightPanelExpanded, showLeftPanel, showRightPanel, isResizing]);
 
-  /**
-   * 限制宽度在有效范围内
-   * @param width - 宽度值
-   * @param min - 最小宽度
-   * @param max - 最大宽度
-   */
-  function clampWidth(width: number, min: number, max: number): number {
+  const clampWidth = useCallback((width: number, min: number, max: number): number => {
     return Math.max(min, Math.min(max, width));
-  }
+  }, []);
 
-  /**
-   * 切换左侧面板展开状态
-   */
-  function toggleLeftPanel(): void {
-    leftPanelExpanded.value = !leftPanelExpanded.value;
-  }
+  const toggleLeftPanel = useCallback(() => {
+    setLeftPanelExpanded(prev => !prev);
+  }, []);
 
-  /**
-   * 切换右侧面板展开状态
-   */
-  function toggleRightPanel(): void {
-    rightPanelExpanded.value = !rightPanelExpanded.value;
-  }
+  const toggleRightPanel = useCallback(() => {
+    setRightPanelExpanded(prev => !prev);
+  }, []);
 
-  /**
-   * 设置左侧面板宽度
-   * @param width - 新宽度
-   */
-  function setLeftPanelWidth(width: number): void {
-    leftPanelWidth.value = clampWidth(width, opts.leftPanelMinWidth, opts.leftPanelMaxWidth);
-  }
+  const setLeftPanelWidth = useCallback((width: number) => {
+    setLeftPanelWidthState(clampWidth(width, opts.leftPanelMinWidth, opts.leftPanelMaxWidth));
+  }, [clampWidth, opts.leftPanelMinWidth, opts.leftPanelMaxWidth]);
 
-  /**
-   * 设置右侧面板宽度
-   * @param width - 新宽度
-   */
-  function setRightPanelWidth(width: number): void {
-    rightPanelWidth.value = clampWidth(width, opts.rightPanelMinWidth, opts.rightPanelMaxWidth);
-  }
+  const setRightPanelWidth = useCallback((width: number) => {
+    setRightPanelWidthState(clampWidth(width, opts.rightPanelMinWidth, opts.rightPanelMaxWidth));
+  }, [clampWidth, opts.rightPanelMinWidth, opts.rightPanelMaxWidth]);
 
-  /**
-   * 展开左侧面板
-   */
-  function expandLeftPanel(): void {
-    leftPanelExpanded.value = true;
-  }
+  const expandLeftPanel = useCallback(() => setLeftPanelExpanded(true), []);
+  const collapseLeftPanel = useCallback(() => setLeftPanelExpanded(false), []);
+  const expandRightPanel = useCallback(() => setRightPanelExpanded(true), []);
+  const collapseRightPanel = useCallback(() => setRightPanelExpanded(false), []);
+  const showLeft = useCallback(() => setShowLeftPanel(true), []);
+  const hideLeft = useCallback(() => setShowLeftPanel(false), []);
+  const showRight = useCallback(() => setShowRightPanel(true), []);
+  const hideRight = useCallback(() => setShowRightPanel(false), []);
 
-  /**
-   * 收起左侧面板
-   */
-  function collapseLeftPanel(): void {
-    leftPanelExpanded.value = false;
-  }
+  const resetLayout = useCallback(() => {
+    setLeftPanelWidthState(opts.leftPanelWidth);
+    setRightPanelWidthState(opts.rightPanelWidth);
+    setLeftPanelExpanded(opts.leftPanelExpanded);
+    setRightPanelExpanded(opts.rightPanelExpanded);
+    setShowLeftPanel(true);
+    setShowRightPanel(true);
+  }, [opts]);
 
-  /**
-   * 展开右侧面板
-   */
-  function expandRightPanel(): void {
-    rightPanelExpanded.value = true;
-  }
-
-  /**
-   * 收起右侧面板
-   */
-  function collapseRightPanel(): void {
-    rightPanelExpanded.value = false;
-  }
-
-  /**
-   * 显示左侧面板
-   */
-  function showLeft(): void {
-    showLeftPanel.value = true;
-  }
-
-  /**
-   * 隐藏左侧面板
-   */
-  function hideLeft(): void {
-    showLeftPanel.value = false;
-  }
-
-  /**
-   * 显示右侧面板
-   */
-  function showRight(): void {
-    showRightPanel.value = true;
-  }
-
-  /**
-   * 隐藏右侧面板
-   */
-  function hideRight(): void {
-    showRightPanel.value = false;
-  }
-
-  /**
-   * 重置布局到默认配置
-   */
-  function resetLayout(): void {
-    leftPanelWidth.value = opts.leftPanelWidth;
-    rightPanelWidth.value = opts.rightPanelWidth;
-    leftPanelExpanded.value = opts.leftPanelExpanded;
-    rightPanelExpanded.value = opts.rightPanelExpanded;
-    showLeftPanel.value = true;
-    showRightPanel.value = true;
-  }
-
-  /**
-   * 保存布局配置到本地存储
-   */
-  function saveLayout(): void {
+  const saveLayout = useCallback(() => {
     if (!opts.persistLayout || typeof localStorage === 'undefined') return;
-
     const layoutData = {
-      leftPanelWidth: leftPanelWidth.value,
-      rightPanelWidth: rightPanelWidth.value,
-      leftPanelExpanded: leftPanelExpanded.value,
-      rightPanelExpanded: rightPanelExpanded.value,
-      showLeftPanel: showLeftPanel.value,
-      showRightPanel: showRightPanel.value,
+      leftPanelWidth,
+      rightPanelWidth,
+      leftPanelExpanded,
+      rightPanelExpanded,
+      showLeftPanel,
+      showRightPanel,
     };
-
     try {
       localStorage.setItem(opts.storageKey, JSON.stringify(layoutData));
     } catch (e) {
       console.warn('Failed to save workbench layout:', e);
     }
-  }
+  }, [opts, leftPanelWidth, rightPanelWidth, leftPanelExpanded, rightPanelExpanded, showLeftPanel, showRightPanel]);
 
-  /**
-   * 从本地存储加载布局配置
-   */
-  function loadLayout(): void {
+  const loadLayout = useCallback(() => {
     if (!opts.persistLayout || typeof localStorage === 'undefined') return;
-
     try {
       const stored = localStorage.getItem(opts.storageKey);
       if (stored) {
         const layoutData = JSON.parse(stored);
-        if (layoutData.leftPanelWidth !== undefined) {
-          leftPanelWidth.value = layoutData.leftPanelWidth;
-        }
-        if (layoutData.rightPanelWidth !== undefined) {
-          rightPanelWidth.value = layoutData.rightPanelWidth;
-        }
-        if (layoutData.leftPanelExpanded !== undefined) {
-          leftPanelExpanded.value = layoutData.leftPanelExpanded;
-        }
-        if (layoutData.rightPanelExpanded !== undefined) {
-          rightPanelExpanded.value = layoutData.rightPanelExpanded;
-        }
-        if (layoutData.showLeftPanel !== undefined) {
-          showLeftPanel.value = layoutData.showLeftPanel;
-        }
-        if (layoutData.showRightPanel !== undefined) {
-          showRightPanel.value = layoutData.showRightPanel;
-        }
+        if (layoutData.leftPanelWidth !== undefined) setLeftPanelWidthState(layoutData.leftPanelWidth);
+        if (layoutData.rightPanelWidth !== undefined) setRightPanelWidthState(layoutData.rightPanelWidth);
+        if (layoutData.leftPanelExpanded !== undefined) setLeftPanelExpanded(layoutData.leftPanelExpanded);
+        if (layoutData.rightPanelExpanded !== undefined) setRightPanelExpanded(layoutData.rightPanelExpanded);
+        if (layoutData.showLeftPanel !== undefined) setShowLeftPanel(layoutData.showLeftPanel);
+        if (layoutData.showRightPanel !== undefined) setShowRightPanel(layoutData.showRightPanel);
       }
     } catch (e) {
       console.warn('Failed to load workbench layout:', e);
     }
-  }
+  }, [opts]);
 
-  /**
-   * 设置调整状态
-   * @param resizing - 是否正在调整
-   */
-  function setResizing(resizing: boolean): void {
-    isResizing.value = resizing;
+  const setResizing = useCallback((resizing: boolean) => {
+    setIsResizing(resizing);
     uiStore.setDragging(resizing);
-  }
+  }, [uiStore]);
 
-  // 如果启用了持久化，监听变化并保存
-  if (opts.persistLayout) {
-    watch(
-      [leftPanelWidth, rightPanelWidth, leftPanelExpanded, rightPanelExpanded, showLeftPanel, showRightPanel],
-      () => {
-        saveLayout();
-      },
-      { deep: true }
-    );
-
-    // 初始化时加载布局
+  // Persist effect
+  useEffect(() => {
     loadLayout();
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (opts.persistLayout) {
+      saveLayout();
+    }
+  }, [saveLayout, opts.persistLayout]);
 
   return {
     state,

@@ -1,10 +1,11 @@
 /**
  * 卡片状态管理 Store
  * @module core/state/stores/card
- * @description 管理打开的卡片列表和卡片状态
+ * @description 管理打开的卡片列表和卡片状态（框架无关实现）
  */
 
-import { defineStore } from 'pinia';
+import { createStore } from '../store-core';
+import { useStore } from '../use-store';
 import type {
   BaseCardInfo as SDKBaseCardInfo,
   Card as SDKCard,
@@ -77,347 +78,340 @@ export interface CardStoreState {
   loadingCards: Set<string>;
 }
 
-/**
- * 卡片状态 Store
- * 
- * 负责管理编辑器中打开的卡片，包括：
- * - 打开的卡片列表
- * - 当前活动卡片
- * - 选中的基础卡片
- * - 卡片修改状态跟踪
- * 
- * @example
- * ```typescript
- * const cardStore = useCardStore();
- * 
- * // 添加卡片
- * cardStore.addCard(card);
- * 
- * // 设置活动卡片
- * cardStore.setActiveCard(cardId);
- * 
- * // 检查是否有修改
- * if (cardStore.hasModifiedCards) {
- *   // 提示保存
- * }
- * ```
- */
-export const useCardStore = defineStore('card', {
-  state: (): CardStoreState => ({
+// ─── Store 实例 ───────────────────────────────────────────
+
+const cardStore = createStore<CardStoreState>({
+  openCards: new Map(),
+  activeCardId: null,
+  selectedBaseCardId: null,
+  loadingCards: new Set(),
+});
+
+// ─── Getters ──────────────────────────────────────────────
+
+function _openCardList(s: CardStoreState): CardInfo[] {
+  return Array.from(s.openCards.values());
+}
+
+function _activeCard(s: CardStoreState): CardInfo | null {
+  if (!s.activeCardId) return null;
+  return s.openCards.get(s.activeCardId) ?? null;
+}
+
+function _hasOpenCards(s: CardStoreState): boolean {
+  return s.openCards.size > 0;
+}
+
+function _openCardCount(s: CardStoreState): number {
+  return s.openCards.size;
+}
+
+function _hasModifiedCards(s: CardStoreState): boolean {
+  for (const card of s.openCards.values()) {
+    if (card.isModified) return true;
+  }
+  return false;
+}
+
+function _modifiedCards(s: CardStoreState): CardInfo[] {
+  return Array.from(s.openCards.values()).filter((card) => card.isModified);
+}
+
+function _openCardIds(s: CardStoreState): string[] {
+  return Array.from(s.openCards.keys());
+}
+
+function _isLoadingAny(s: CardStoreState): boolean {
+  return s.loadingCards.size > 0;
+}
+
+// ─── Actions ──────────────────────────────────────────────
+
+function addCard(card: SDKCard, filePath?: string): void {
+  const s = cardStore.getState();
+  const cardInfo: CardInfo = {
+    id: card.id,
+    metadata: card.metadata,
+    structure: card.structure.structure,
+    isLoading: false,
+    isModified: false,
+    lastModified: Date.now(),
+    filePath,
+  };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(card.id, cardInfo);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function removeCard(cardId: string): void {
+  const s = cardStore.getState();
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.delete(cardId);
+
+  const newLoadingCards = new Set(s.loadingCards);
+  newLoadingCards.delete(cardId);
+
+  let newActiveCardId = s.activeCardId;
+  if (s.activeCardId === cardId) {
+    const cards = Array.from(newOpenCards.keys());
+    newActiveCardId = cards.length > 0 ? (cards[0] ?? null) : null;
+  }
+
+  let newSelectedBaseCardId = s.selectedBaseCardId;
+  if (newSelectedBaseCardId) {
+    if (newActiveCardId) {
+      const activeCard = newOpenCards.get(newActiveCardId);
+      if (activeCard) {
+        const hasBaseCard = activeCard.structure.some((bc) => bc.id === newSelectedBaseCardId);
+        if (!hasBaseCard) newSelectedBaseCardId = null;
+      } else {
+        newSelectedBaseCardId = null;
+      }
+    } else {
+      newSelectedBaseCardId = null;
+    }
+  }
+
+  cardStore.setState({
+    openCards: newOpenCards,
+    loadingCards: newLoadingCards,
+    activeCardId: newActiveCardId,
+    selectedBaseCardId: newSelectedBaseCardId,
+  });
+}
+
+function setActiveCard(cardId: string | null): void {
+  cardStore.setState({ activeCardId: cardId, selectedBaseCardId: null });
+}
+
+function setSelectedBaseCard(baseCardId: string | null): void {
+  cardStore.setState({ selectedBaseCardId: baseCardId });
+}
+
+function getCard(cardId: string): CardInfo | undefined {
+  return cardStore.getState().openCards.get(cardId);
+}
+
+function isCardOpen(cardId: string): boolean {
+  return cardStore.getState().openCards.has(cardId);
+}
+
+function updateCardMetadata(cardId: string, metadata: Partial<CardMetadata>): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const updatedCard: CardInfo = {
+    ...card,
+    metadata: { ...card.metadata, ...metadata },
+    isModified: true,
+    lastModified: Date.now(),
+  };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function updateCardStructure(cardId: string, structure: BaseCardInfo[]): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const updatedCard: CardInfo = {
+    ...card,
+    structure: [...structure],
+    isModified: true,
+    lastModified: Date.now(),
+  };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function addBaseCard(cardId: string, baseCard: BaseCardInfo, position?: number): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const newStructure = [...card.structure];
+  if (position !== undefined && position >= 0 && position <= newStructure.length) {
+    newStructure.splice(position, 0, baseCard);
+  } else {
+    newStructure.push(baseCard);
+  }
+
+  const updatedCard: CardInfo = {
+    ...card,
+    structure: newStructure,
+    isModified: true,
+    lastModified: Date.now(),
+  };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function removeBaseCard(cardId: string, baseCardId: string): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const index = card.structure.findIndex((bc) => bc.id === baseCardId);
+  if (index === -1) return;
+
+  const newStructure = [...card.structure];
+  newStructure.splice(index, 1);
+
+  const updatedCard: CardInfo = {
+    ...card,
+    structure: newStructure,
+    isModified: true,
+    lastModified: Date.now(),
+  };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+
+  const newSelectedBaseCardId = s.selectedBaseCardId === baseCardId ? null : s.selectedBaseCardId;
+  cardStore.setState({ openCards: newOpenCards, selectedBaseCardId: newSelectedBaseCardId });
+}
+
+function reorderBaseCards(cardId: string, fromIndex: number, toIndex: number): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card || fromIndex === toIndex) return;
+
+  const newStructure = [...card.structure];
+  const [removed] = newStructure.splice(fromIndex, 1);
+  if (!removed) return;
+  newStructure.splice(toIndex, 0, removed);
+
+  const updatedCard: CardInfo = {
+    ...card,
+    structure: newStructure,
+    isModified: true,
+    lastModified: Date.now(),
+  };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function markCardSaved(cardId: string): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const updatedCard: CardInfo = { ...card, isModified: false };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function markCardModified(cardId: string): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const updatedCard: CardInfo = { ...card, isModified: true, lastModified: Date.now() };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function setCardLoading(cardId: string, loading: boolean): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+
+  const newLoadingCards = new Set(s.loadingCards);
+  if (loading) {
+    newLoadingCards.add(cardId);
+  } else {
+    newLoadingCards.delete(cardId);
+  }
+
+  if (card) {
+    const updatedCard: CardInfo = { ...card, isLoading: loading };
+    const newOpenCards = new Map(s.openCards);
+    newOpenCards.set(cardId, updatedCard);
+    cardStore.setState({ openCards: newOpenCards, loadingCards: newLoadingCards });
+  } else {
+    cardStore.setState({ loadingCards: newLoadingCards });
+  }
+}
+
+function updateFilePath(cardId: string, filePath: string): void {
+  const s = cardStore.getState();
+  const card = s.openCards.get(cardId);
+  if (!card) return;
+
+  const updatedCard: CardInfo = { ...card, filePath };
+  const newOpenCards = new Map(s.openCards);
+  newOpenCards.set(cardId, updatedCard);
+  cardStore.setState({ openCards: newOpenCards });
+}
+
+function clearAll(): void {
+  cardStore.setState({
     openCards: new Map(),
     activeCardId: null,
     selectedBaseCardId: null,
     loadingCards: new Set(),
-  }),
+  });
+}
 
-  getters: {
-    /**
-     * 获取打开的卡片列表（数组形式）
-     */
-    openCardList(): CardInfo[] {
-      return Array.from(this.openCards.values());
-    },
+// ─── 导出 ─────────────────────────────────────────────────
 
-    /**
-     * 获取当前活动的卡片
-     */
-    activeCard(): CardInfo | null {
-      if (!this.activeCardId) return null;
-      return this.openCards.get(this.activeCardId) ?? null;
-    },
+/**
+ * 获取 Card Store 实例（非组件调用）
+ */
+export function getCardStore() {
+  return {
+    getState: cardStore.getState,
+    addCard,
+    removeCard,
+    setActiveCard,
+    setSelectedBaseCard,
+    getCard,
+    isCardOpen,
+    updateCardMetadata,
+    updateCardStructure,
+    addBaseCard,
+    removeBaseCard,
+    reorderBaseCards,
+    markCardSaved,
+    markCardModified,
+    setCardLoading,
+    updateFilePath,
+    clearAll,
+    // Getters
+    openCardList: _openCardList,
+    activeCard: _activeCard,
+    hasOpenCards: _hasOpenCards,
+    openCardCount: _openCardCount,
+    hasModifiedCards: _hasModifiedCards,
+    modifiedCards: _modifiedCards,
+    openCardIds: _openCardIds,
+    isLoadingAny: _isLoadingAny,
+  };
+}
 
-    /**
-     * 是否有打开的卡片
-     */
-    hasOpenCards(): boolean {
-      return this.openCards.size > 0;
-    },
+/**
+ * React Hook：使用 Card Store（组件调用）
+ * 
+ * 支持两种调用方式：
+ * - useCardStore() - 返回整个 state
+ * - useCardStore(selector) - 返回选择器选中的状态片段
+ */
+export function useCardStore(): Readonly<CardStoreState>;
+export function useCardStore<U>(selector: (state: Readonly<CardStoreState>) => U): U;
+export function useCardStore<U>(selector?: (state: Readonly<CardStoreState>) => U): U | Readonly<CardStoreState> {
+  if (!selector) {
+    return useStore(cardStore, (state) => state);
+  }
+  return useStore(cardStore, selector);
+}
 
-    /**
-     * 打开的卡片数量
-     */
-    openCardCount(): number {
-      return this.openCards.size;
-    },
+export type CardStore = ReturnType<typeof getCardStore>;
 
-    /**
-     * 是否有修改过的卡片
-     */
-    hasModifiedCards(): boolean {
-      for (const card of this.openCards.values()) {
-        if (card.isModified) return true;
-      }
-      return false;
-    },
-
-    /**
-     * 获取修改过的卡片列表
-     */
-    modifiedCards(): CardInfo[] {
-      return Array.from(this.openCards.values()).filter((card) => card.isModified);
-    },
-
-    /**
-     * 获取卡片 ID 列表
-     */
-    openCardIds(): string[] {
-      return Array.from(this.openCards.keys());
-    },
-
-    /**
-     * 是否正在加载任何卡片
-     */
-    isLoadingAny(): boolean {
-      return this.loadingCards.size > 0;
-    },
-  },
-
-  actions: {
-    /**
-     * 添加卡片
-     * @param card - 卡片数据
-     * @param filePath - 文件路径（可选）
-     */
-    addCard(card: SDKCard, filePath?: string): void {
-      const cardInfo: CardInfo = {
-        id: card.id,
-        metadata: card.metadata,
-        structure: card.structure.structure,
-        isLoading: false,
-        isModified: false,
-        lastModified: Date.now(),
-        filePath,
-      };
-      // 创建新的 Map 引用以确保 Vue 响应式系统能检测到变化
-      const newOpenCards = new Map(this.openCards);
-      newOpenCards.set(card.id, cardInfo);
-      this.openCards = newOpenCards;
-    },
-
-    /**
-     * 移除卡片
-     * @param cardId - 卡片 ID
-     */
-    removeCard(cardId: string): void {
-      // 创建新的 Map/Set 引用以确保响应式
-      const newOpenCards = new Map(this.openCards);
-      newOpenCards.delete(cardId);
-      this.openCards = newOpenCards;
-      
-      const newLoadingCards = new Set(this.loadingCards);
-      newLoadingCards.delete(cardId);
-      this.loadingCards = newLoadingCards;
-
-      if (this.activeCardId === cardId) {
-        // 切换到下一个卡片或设为 null
-        const cards = Array.from(this.openCards.keys());
-        this.activeCardId = cards.length > 0 ? (cards[0] ?? null) : null;
-      }
-
-      if (this.selectedBaseCardId) {
-        // 检查选中的基础卡片是否属于被移除的卡片
-        const activeCard = this.activeCard;
-        if (activeCard) {
-          const hasBaseCard = activeCard.structure.some(
-            (bc) => bc.id === this.selectedBaseCardId
-          );
-          if (!hasBaseCard) {
-            this.selectedBaseCardId = null;
-          }
-        } else {
-          this.selectedBaseCardId = null;
-        }
-      }
-    },
-
-    /**
-     * 设置活动卡片
-     * @param cardId - 卡片 ID，null 表示取消选中
-     */
-    setActiveCard(cardId: string | null): void {
-      this.activeCardId = cardId;
-      // 切换活动卡片时，清除基础卡片选中状态
-      this.selectedBaseCardId = null;
-    },
-
-    /**
-     * 设置选中的基础卡片
-     * @param baseCardId - 基础卡片 ID，null 表示取消选中
-     */
-    setSelectedBaseCard(baseCardId: string | null): void {
-      this.selectedBaseCardId = baseCardId;
-    },
-
-    /**
-     * 获取卡片信息
-     * @param cardId - 卡片 ID
-     * @returns 卡片信息或 undefined
-     */
-    getCard(cardId: string): CardInfo | undefined {
-      return this.openCards.get(cardId);
-    },
-
-    /**
-     * 检查卡片是否已打开
-     * @param cardId - 卡片 ID
-     * @returns 是否已打开
-     */
-    isCardOpen(cardId: string): boolean {
-      return this.openCards.has(cardId);
-    },
-
-    /**
-     * 更新卡片元数据
-     * @param cardId - 卡片 ID
-     * @param metadata - 要更新的元数据字段
-     */
-    updateCardMetadata(cardId: string, metadata: Partial<CardMetadata>): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        card.metadata = { ...card.metadata, ...metadata };
-        card.isModified = true;
-        card.lastModified = Date.now();
-      }
-    },
-
-    /**
-     * 更新卡片结构
-     * @param cardId - 卡片 ID
-     * @param structure - 新的基础卡片结构
-     */
-    updateCardStructure(cardId: string, structure: BaseCardInfo[]): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        card.structure = structure;
-        card.isModified = true;
-        card.lastModified = Date.now();
-      }
-    },
-
-    /**
-     * 添加基础卡片到卡片结构
-     * @param cardId - 卡片 ID
-     * @param baseCard - 基础卡片信息
-     * @param position - 插入位置（可选，默认末尾）
-     */
-    addBaseCard(cardId: string, baseCard: BaseCardInfo, position?: number): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        if (position !== undefined && position >= 0 && position <= card.structure.length) {
-          card.structure.splice(position, 0, baseCard);
-        } else {
-          card.structure.push(baseCard);
-        }
-        card.isModified = true;
-        card.lastModified = Date.now();
-      }
-    },
-
-    /**
-     * 从卡片结构中移除基础卡片
-     * @param cardId - 卡片 ID
-     * @param baseCardId - 基础卡片 ID
-     */
-    removeBaseCard(cardId: string, baseCardId: string): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        const index = card.structure.findIndex((bc) => bc.id === baseCardId);
-        if (index !== -1) {
-          card.structure.splice(index, 1);
-          card.isModified = true;
-          card.lastModified = Date.now();
-        }
-
-        if (this.selectedBaseCardId === baseCardId) {
-          this.selectedBaseCardId = null;
-        }
-      }
-    },
-
-    /**
-     * 重新排序基础卡片
-     * @param cardId - 卡片 ID
-     * @param fromIndex - 原位置
-     * @param toIndex - 目标位置
-     */
-    reorderBaseCards(cardId: string, fromIndex: number, toIndex: number): void {
-      const card = this.openCards.get(cardId);
-      if (card && fromIndex !== toIndex) {
-        const [removed] = card.structure.splice(fromIndex, 1);
-        if (removed) {
-          card.structure.splice(toIndex, 0, removed);
-          card.isModified = true;
-          card.lastModified = Date.now();
-        }
-      }
-    },
-
-    /**
-     * 标记卡片为已保存
-     * @param cardId - 卡片 ID
-     */
-    markCardSaved(cardId: string): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        card.isModified = false;
-      }
-    },
-
-    /**
-     * 标记卡片为已修改
-     * @param cardId - 卡片 ID
-     */
-    markCardModified(cardId: string): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        card.isModified = true;
-        card.lastModified = Date.now();
-      }
-    },
-
-    /**
-     * 设置卡片加载状态
-     * @param cardId - 卡片 ID
-     * @param loading - 是否正在加载
-     */
-    setCardLoading(cardId: string, loading: boolean): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        card.isLoading = loading;
-      }
-      // 创建新的 Set 引用以确保响应式
-      const newLoadingCards = new Set(this.loadingCards);
-      if (loading) {
-        newLoadingCards.add(cardId);
-      } else {
-        newLoadingCards.delete(cardId);
-      }
-      this.loadingCards = newLoadingCards;
-    },
-
-    /**
-     * 更新卡片文件路径
-     * @param cardId - 卡片 ID
-     * @param filePath - 文件路径
-     */
-    updateFilePath(cardId: string, filePath: string): void {
-      const card = this.openCards.get(cardId);
-      if (card) {
-        card.filePath = filePath;
-      }
-    },
-
-    /**
-     * 清除所有卡片
-     */
-    clearAll(): void {
-      this.openCards = new Map();
-      this.activeCardId = null;
-      this.selectedBaseCardId = null;
-      this.loadingCards = new Set();
-    },
-  },
-});
-
-/** 导出类型 */
-export type CardStore = ReturnType<typeof useCardStore>;
+/** 暴露内部 store 用于测试 */
+export const __cardStoreInternal = cardStore;

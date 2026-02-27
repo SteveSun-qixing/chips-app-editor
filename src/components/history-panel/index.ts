@@ -3,4 +3,4 @@
  * @module components/history-panel
  */
 
-export { default as HistoryPanel } from './HistoryPanel.vue';
+export { HistoryPanel } from './HistoryPanel';

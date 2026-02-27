@@ -1,0 +1,60 @@
+.dock {
+    position: absolute;
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--chips-color-surface, rgba(255, 255, 255, 0.85));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--chips-color-border-light, rgba(255, 255, 255, 0.6));
+    border-radius: var(--chips-radius-lg, 12px);
+    box-shadow: var(--chips-shadow-float, 0 6px 16px -2px rgba(0, 0, 0, 0.14));
+    pointer-events: auto;
+    z-index: 1000;
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+/* 底部位置 */
+.dock--bottom {
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    flex-direction: row;
+}
+
+/* 左侧位置 */
+.dock--left {
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    flex-direction: column;
+}
+
+/* 右侧位置 */
+.dock--right {
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    flex-direction: column;
+}
+
+/* 分隔线 */
+.dock__divider {
+    width: 1px;
+    height: 32px;
+    background: var(--chips-color-border, #d1d5db);
+    align-self: center;
+    flex-shrink: 0;
+}
+
+.dock--left .dock__divider,
+.dock--right .dock__divider {
+    width: 32px;
+    height: 1px;
+}
+
+/* 深色主题适配 */
+:global(.dark) .dock {
+    background: var(--chips-color-surface-dark, #1a1a1a);
+    box-shadow: var(--chips-shadow-lg-dark, 0 8px 24px rgba(0, 0, 0, 0.3));
+}
